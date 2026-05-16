@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';"
+    />
+    <title>gitGraph</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        color: #e5e7eb;
+        font-family: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
+      }
+      #root { display: flex; flex-direction: column; height: 100vh; }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border-bottom: 1px solid #1f2937;
+        font-size: 12px;
+      }
+      .legend {
+        display: flex;
+        gap: 10px;
+        color: #9ca3af;
+        font-size: 11px;
+      }
+      .dot {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+      #status {
+        margin-left: auto;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+      #canvas-host {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
+      .error {
+        padding: 16px;
+        font-size: 12px;
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <header>
+        <strong>gitGraph</strong>
+        <div class="legend">
+          <span><span class="dot" style="background:#ef4444"></span>changed</span>
+          <span><span class="dot" style="background:#f97316"></span>downstream</span>
+          <span><span class="dot" style="background:#4ade80"></span>unaffected</span>
+        </div>
+        <span id="status">Initializing…</span>
+      </header>
+      <div id="canvas-host"></div>
+    </div>
+    <script type="module" nonce="{{nonce}}" src="{{scriptUri}}"></script>
+  </body>
+</html>

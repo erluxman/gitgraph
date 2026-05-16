@@ -1,0 +1,63 @@
+{
+  "name": "gitgraph-vscode",
+  "displayName": "gitGraph",
+  "version": "0.1.0",
+  "description": "Visual dependency-aware diff analysis for your workspace.",
+  "private": true,
+  "publisher": "gitgraph",
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Visualization", "SCM Providers"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gitgraph",
+          "title": "gitGraph",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "gitgraph": [
+        {
+          "id": "gitgraph.graph",
+          "name": "Dependency graph",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "gitgraph.openInEditor",
+        "title": "gitGraph: Open graph in editor tab"
+      },
+      {
+        "command": "gitgraph.reindex",
+        "title": "gitGraph: Reindex workspace"
+      },
+      {
+        "command": "gitgraph.compareBranches",
+        "title": "gitGraph: Compare branches"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch",
+    "test": "echo 'no tests yet' && exit 0",
+    "typecheck": "tsc -b",
+    "clean": "rm -rf dist dist-types .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@gitgraph/core": "workspace:*",
+    "@gitgraph/graph-renderer": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "esbuild": "^0.24.0"
+  }
+}

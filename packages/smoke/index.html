@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>gitGraph renderer smoke test</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0f172a;
+        color: #e5e7eb;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid #1f2937;
+        font-size: 13px;
+      }
+      .legend {
+        display: flex;
+        gap: 14px;
+        color: #9ca3af;
+        font-size: 12px;
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      #canvas-host {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+      }
+      .controls input {
+        background: #111827;
+        border: 1px solid #1f2937;
+        color: #e5e7eb;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        width: 200px;
+      }
+      .controls button {
+        background: #1e40af;
+        color: white;
+        border: 0;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      #status {
+        font-size: 12px;
+        color: #9ca3af;
+        margin-left: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <header>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <strong>gitGraph smoke test</strong>
+          <div class="legend">
+            <span><span class="dot" style="background:#ef4444"></span>changed</span>
+            <span><span class="dot" style="background:#f97316"></span>downstream</span>
+            <span><span class="dot" style="background:#4ade80"></span>unaffected</span>
+            <span><span class="dot" style="background:#facc15;border-radius:0;width:8px;height:8px;border:2px solid #facc15"></span>core</span>
+          </div>
+          <span id="status">loading…</span>
+        </div>
+        <div class="controls">
+          <input id="filter" placeholder="filter: text, folder:src, risk:>0.5, core:true" />
+          <button id="reset">Reset</button>
+        </div>
+      </header>
+      <div id="canvas-host"></div>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

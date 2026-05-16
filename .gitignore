@@ -1,0 +1,20 @@
+node_modules/
+dist/
+dist-types/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+*.log
+.vscode-test/
+
+# Local-only bun cache (this sandbox can't use ~/.bun)
+.bun-cache/
+.bun-tmp/
+
+# Claude Code per-user state
+.claude/settings.local.json
+.claude/worktrees/

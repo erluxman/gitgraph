@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist-types",
+    "rootDir": "./src",
+    "types": ["chrome"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "dist-types", "node_modules"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../graph-renderer" }
+  ]
+}
