@@ -19,35 +19,10 @@ import {
   type RiskScore,
 } from "@gitgraph/core";
 import type { GitHubClient } from "./github/client.js";
-import type {
-  PrLocator,
-  RepoLocator,
-  RepoTreeEntry,
-} from "./github/types.js";
+import type { RepoLocator, RepoTreeEntry } from "./github/types.js";
+import type { ScanTarget } from "./orchestrator-types.js";
 
-/**
- * What the scan is comparing. The orchestrator handles three cases
- * with the same downstream pipeline (fetch tree → parse → graph → diff
- * → score); only the "where do `changedFiles` and `headSha` come from?"
- * step varies.
- *
- *   pr        — fetch /pulls/N for refs + /pulls/N/files for changed list
- *   compare   — fetch /compare/{base}...{head} (no PR needed)
- *   snapshot  — single ref; no changed list (all nodes will be green)
- */
-export type ScanTarget =
-  | { readonly kind: "pr"; readonly locator: PrLocator }
-  | {
-      readonly kind: "compare";
-      readonly locator: RepoLocator;
-      readonly base: string;
-      readonly head: string;
-    }
-  | {
-      readonly kind: "snapshot";
-      readonly locator: RepoLocator;
-      readonly ref: string;
-    };
+export type { ScanTarget } from "./orchestrator-types.js";
 
 /**
  * Snapshot the renderer consumes. Built progressively — the same shape is

@@ -3,7 +3,7 @@
   "name": "gitGraph",
   "version": "0.1.0",
   "description": "Visual dependency-aware diff analysis for GitHub PRs.",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "https://github.com/*",
     "https://api.github.com/*"
@@ -12,11 +12,21 @@
     "default_popup": "popup.html",
     "default_title": "gitGraph settings"
   },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": ["https://github.com/*/*"],
-      "js": ["content.js"],
+      "js": ["content-bootstrap.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content-renderer.js"],
+      "matches": ["https://github.com/*"]
     }
   ],
   "icons": {}

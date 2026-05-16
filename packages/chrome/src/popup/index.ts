@@ -15,7 +15,10 @@ declare const chrome: {
     ): void;
     sendMessage(tabId: number, msg: PopupToContent, cb?: (r: unknown) => void): void;
   };
-  runtime?: { lastError?: { message: string } };
+  runtime?: {
+    lastError?: { message: string };
+    sendMessage?(msg: unknown, cb?: (r: unknown) => void): void;
+  };
 };
 
 interface ActiveContext {
@@ -151,7 +154,14 @@ async function openGraph(): Promise<void> {
   status.classList.remove("error");
   status.textContent = "Opening overlay…";
   try {
-    await sendToTab(activeContext.tabId, { kind: "open-overlay", target });
+    // Route through the background worker so it can lazy-inject the
+    // heavy renderer bundle if the user hasn't triggered the overlay
+    // on this tab yet.
+    await sendToBackground({
+      kind: "background:open-overlay",
+      tabId: activeContext.tabId,
+      target,
+    });
     status.textContent = "Done — check the active tab.";
     setTimeout(() => window.close(), 600);
   } catch (err) {
@@ -174,16 +184,21 @@ function getActiveTab(): Promise<{ id?: number; url?: string } | null> {
   });
 }
 
-function sendToTab(tabId: number, msg: PopupToContent): Promise<unknown> {
+function sendToBackground(msg: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    if (!chrome.tabs?.sendMessage) {
-      reject(new Error("chrome.tabs API unavailable"));
+    if (!chrome.runtime?.sendMessage) {
+      reject(new Error("chrome.runtime.sendMessage API unavailable"));
       return;
     }
-    chrome.tabs.sendMessage(tabId, msg, (response) => {
+    chrome.runtime.sendMessage(msg, (response) => {
       const err = chrome.runtime?.lastError;
       if (err !== undefined) {
         reject(new Error(err.message));
+        return;
+      }
+      const r = response as { ok?: boolean; error?: string };
+      if (r?.ok === false) {
+        reject(new Error(r.error ?? "background error"));
         return;
       }
       resolve(response);
