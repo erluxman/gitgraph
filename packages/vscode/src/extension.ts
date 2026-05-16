@@ -4,6 +4,7 @@ import { SidebarProvider } from "./sidebar.js";
 let provider: SidebarProvider | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
+  console.log("[gitGraph] activate");
   provider = new SidebarProvider(context, vscode);
 
   context.subscriptions.push(
