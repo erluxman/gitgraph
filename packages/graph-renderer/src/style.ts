@@ -43,6 +43,20 @@ export function nodeStyle(
 ): NodeStyle {
   const o = { ...DEFAULT_OPTS, ...opts };
 
+  // Child satellite nodes use a fixed, small radius. They inherit the
+  // parent's impact colour but stay visually subordinate.
+  if (node.kind === "child") {
+    const childColour = darken(baseColourFor(node), 0.55);
+    return {
+      radius: 4,
+      fill: childColour,
+      alpha: 0.85,
+      borderColour: null,
+      borderWidth: 0,
+      labelColour: 0xcbd5e1,
+    };
+  }
+
   // Changed (red) files are the most important thing on screen — make
   // them prominent even when they have zero exports (e.g. test files,
   // config-like JS). Orange is bumped a little so consumers don't get

@@ -1,4 +1,14 @@
-import type { ImpactKind, ParsedFile } from "@gitgraph/core";
+import type { ImpactKind, ParsedFile, SymbolKind } from "@gitgraph/core";
+
+/**
+ * What kind of node this is.
+ *
+ *   file   — top-level node, one per source file. Always rendered.
+ *   child  — function/class/variable/widget that orbits its parent
+ *            file when the user has expanded that file. Created on
+ *            demand by `expandNode()`, removed on collapse.
+ */
+export type SceneNodeKind = "file" | "child";
 
 /**
  * Minimal node shape the renderer needs. The core packages produce
@@ -9,7 +19,7 @@ export interface SceneNode {
   readonly path: string;
   readonly folder: string;
   readonly displayName: string;
-  /** Number of public exports — drives node radius. */
+  /** Number of public exports — drives node radius for file nodes. */
   readonly exportCount: number;
   readonly impact: ImpactKind;
   /** Reverse-BFS distance for the orange fade (0 for red, Infinity for green). */
@@ -18,6 +28,30 @@ export interface SceneNode {
   readonly risk: number;
   /** Whether the file is tagged as a core path. */
   readonly core: boolean;
+  /**
+   * What this node represents. File nodes are the default; child nodes
+   * are created when the user expands a file and inherit the parent's
+   * impact/risk for visual continuity.
+   */
+  readonly kind?: SceneNodeKind;
+  /**
+   * For child nodes only: the symbol kind drives the shape (function =
+   * small circle, class = rounded rect, variable = diamond, widget =
+   * accent-coloured circle).
+   */
+  readonly symbol?: SymbolKind;
+  /** For child nodes only: the parent file's id, used as the link target. */
+  readonly parentId?: string;
+  /**
+   * For file nodes only: the exported symbols available for expansion.
+   * The renderer uses this to spawn child satellites on click. Empty
+   * array for files with no exports (those become non-expandable).
+   */
+  readonly children?: readonly {
+    readonly name: string;
+    readonly symbol: SymbolKind;
+    readonly line: number;
+  }[];
   /** Mutable position fields managed by d3-force. */
   x?: number;
   y?: number;

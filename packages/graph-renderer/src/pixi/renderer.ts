@@ -100,6 +100,9 @@ export async function mountRenderer(
   let layout: LayoutHandle = createLayout(scene, fullLayoutOpts(opts));
   let hoverId: string | null = null;
   let filterMatched: ReadonlySet<string> | null = null;
+  // File nodes currently showing satellite children. Toggled via
+  // single-click on a file node.
+  const expanded = new Set<string>();
 
   // Camera controls.
   let panning = false;
@@ -200,7 +203,7 @@ export async function mountRenderer(
     for (const node of currentScene.nodes) {
       const style = nodeStyle(node, { maxExports });
       const g = new Graphics();
-      drawNode(g, style);
+      drawNode(g, style, node);
       g.eventMode = "static";
       g.cursor = "pointer";
       g.on("pointerdown", (ev) => handlePointerDown(node, ev));
@@ -232,13 +235,55 @@ export async function mountRenderer(
     }
   }
 
-  function drawNode(g: Graphics, style: ReturnType<typeof nodeStyle>): void {
+  function drawNode(
+    g: Graphics,
+    style: ReturnType<typeof nodeStyle>,
+    node: SceneNode,
+  ): void {
     g.clear();
-    g.circle(0, 0, style.radius).fill({ color: style.fill, alpha: style.alpha });
+    const r = style.radius;
+    // Symbol-driven shape (child nodes only). File and unknown-kind
+    // nodes stay as circles.
+    if (node.kind === "child") {
+      switch (node.symbol) {
+        case "class":
+          // Rounded rectangle, roughly square.
+          g.roundRect(-r, -r * 0.8, r * 2, r * 1.6, 2)
+            .fill({ color: style.fill, alpha: style.alpha });
+          return;
+        case "variable":
+          // Diamond — rotated square.
+          g.moveTo(0, -r)
+            .lineTo(r, 0)
+            .lineTo(0, r)
+            .lineTo(-r, 0)
+            .closePath()
+            .fill({ color: style.fill, alpha: style.alpha });
+          return;
+        case "widget":
+          // Hexagon, hints at "this is something special" (Flutter widget).
+          drawPolygon(g, r, 6);
+          g.fill({ color: style.fill, alpha: style.alpha });
+          return;
+        // function / undefined fall through to circle.
+      }
+    }
+    g.circle(0, 0, r).fill({ color: style.fill, alpha: style.alpha });
     if (style.borderColour !== null) {
-      g.circle(0, 0, style.radius)
+      g.circle(0, 0, r)
         .stroke({ color: style.borderColour, width: style.borderWidth });
     }
+  }
+
+  function drawPolygon(g: Graphics, r: number, sides: number): void {
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
   }
 
   function drawEdges(): void {
@@ -303,6 +348,9 @@ export async function mountRenderer(
     return 0.08;
   }
 
+  /** Threshold (px in scene coords) before a pointerdown counts as a drag, not a click. */
+  const DRAG_THRESHOLD = 4;
+
   function handlePointerDown(node: SceneNode, ev: FederatedPointerEvent): void {
     if (ev.button === 2) {
       opts.onNodeContextMenu?.(node, ev);
@@ -312,15 +360,24 @@ export async function mountRenderer(
       opts.onNodeJump?.(node, ev);
       return;
     }
-    opts.onNodeClick?.(node, ev);
 
-    // Begin drag: pin node, follow pointer, release on up.
+    // Pin and begin tracking. We don't fire `onNodeClick` or toggle
+    // expansion yet — those happen on pointerup if the pointer never
+    // crossed DRAG_THRESHOLD. That way the user can drag without
+    // accidentally expanding every file they touch.
     const startLocal = camera.toLocal(ev.global);
     layout.pin(node, startLocal.x, startLocal.y);
     layout.reheat(0.3);
+    let dragged = false;
 
     const move = (mv: FederatedPointerEvent) => {
       const p = camera.toLocal(mv.global);
+      if (
+        !dragged &&
+        Math.hypot(p.x - startLocal.x, p.y - startLocal.y) > DRAG_THRESHOLD
+      ) {
+        dragged = true;
+      }
       layout.pin(node, p.x, p.y);
     };
     const up = () => {
@@ -328,6 +385,15 @@ export async function mountRenderer(
       app.stage.off("globalpointermove", move);
       app.stage.off("pointerup", up);
       app.stage.off("pointerupoutside", up);
+      if (!dragged) {
+        opts.onNodeClick?.(node, ev);
+        // Toggle expand state only for file nodes with children. Child
+        // nodes themselves are non-expandable.
+        if (node.kind !== "child" && (node.children?.length ?? 0) > 0) {
+          if (expanded.has(node.id)) collapseNode(node);
+          else expandNode(node);
+        }
+      }
     };
     app.stage.on("globalpointermove", move);
     app.stage.on("pointerup", up);
@@ -340,6 +406,92 @@ export async function mountRenderer(
       height: o.height,
       ...(o.layout ?? {}),
     };
+  }
+
+  // --- expand / collapse ---
+
+  function expandNode(parent: SceneNode): void {
+    if (parent.children === undefined || parent.children.length === 0) return;
+    if (expanded.has(parent.id)) return;
+
+    const px = parent.x ?? 0;
+    const py = parent.y ?? 0;
+    const orbitR = Math.max(34, parent.children.length * 5);
+    const newNodes: SceneNode[] = parent.children.map((child, i) => {
+      const angle = (i / parent.children!.length) * Math.PI * 2;
+      return {
+        id: `${parent.id}::${child.symbol}::${child.name}`,
+        path: parent.path,
+        folder: parent.folder,
+        displayName: child.name,
+        exportCount: 0,
+        impact: parent.impact,
+        distance: parent.distance,
+        risk: parent.risk * 0.4,
+        core: false,
+        kind: "child",
+        symbol: child.symbol,
+        parentId: parent.id,
+        x: px + Math.cos(angle) * orbitR,
+        y: py + Math.sin(angle) * orbitR,
+      };
+    });
+    const newEdges: SceneEdge[] = newNodes.map((c) => ({
+      source: parent.id,
+      target: c.id,
+      weight: 0.4,
+    }));
+
+    expanded.add(parent.id);
+    mutateSceneAndRefresh([...currentScene.nodes, ...newNodes], [
+      ...currentScene.edges,
+      ...newEdges,
+    ]);
+  }
+
+  function collapseNode(parent: SceneNode): void {
+    if (!expanded.has(parent.id)) return;
+    const childIdPrefix = `${parent.id}::`;
+    const newNodes = currentScene.nodes.filter(
+      (n) => n.kind !== "child" || !n.id.startsWith(childIdPrefix),
+    );
+    const newEdges = currentScene.edges.filter((e) => {
+      const aid = typeof e.source === "string" ? e.source : e.source.id;
+      const bid = typeof e.target === "string" ? e.target : e.target.id;
+      return !aid.startsWith(childIdPrefix) && !bid.startsWith(childIdPrefix);
+    });
+    expanded.delete(parent.id);
+    mutateSceneAndRefresh(newNodes, newEdges);
+  }
+
+  /**
+   * Swap the scene's node/edge lists in place, rebuild visual layers
+   * for the new set, and re-bind the simulation's nodes/links. Unlike
+   * `setScene`, this keeps the same simulation instance running — the
+   * existing nodes stay at their current positions, only the delta
+   * (added or removed nodes) is rearranged.
+   */
+  function mutateSceneAndRefresh(
+    nodes: readonly SceneNode[],
+    edges: readonly SceneEdge[],
+  ): void {
+    currentScene = { nodes, edges };
+    for (const view of nodeViews) {
+      view.graphic.destroy();
+      view.label.destroy();
+    }
+    nodeLayer.removeChildren();
+    labelLayer.removeChildren();
+    nodeViews = [];
+    buildNodeViews();
+    // Rebind d3-force's working arrays. forceLink is keyed by `id`, so
+    // passing the new edge list lets it re-resolve string→node refs.
+    layout.simulation.nodes(nodes as SceneNode[]);
+    const linkForce = layout.simulation.force("link") as unknown as
+      | { links?: (l: SceneEdge[]) => void }
+      | undefined;
+    linkForce?.links?.(edges as SceneEdge[]);
+    layout.reheat(0.5);
   }
 }
 
