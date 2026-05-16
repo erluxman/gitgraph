@@ -43,6 +43,32 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand("gitgraph.graph.focus");
     }),
   );
+
+  // Watch for source-file changes and re-index. Debounced so that a
+  // formatter saving 10 files in a burst (e.g. eslint --fix) doesn't
+  // trigger 10 scans — only one shortly after the last write.
+  installFileWatcher(context);
+}
+
+const WATCHED_GLOB = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,dart}";
+const DEBOUNCE_MS = 800;
+
+function installFileWatcher(context: vscode.ExtensionContext): void {
+  const watcher = vscode.workspace.createFileSystemWatcher(WATCHED_GLOB);
+  let pending: NodeJS.Timeout | null = null;
+  const schedule = () => {
+    if (pending !== null) clearTimeout(pending);
+    pending = setTimeout(() => {
+      pending = null;
+      provider?.refresh().catch((err) => {
+        console.error("[gitGraph] auto-refresh failed", err);
+      });
+    }, DEBOUNCE_MS);
+  };
+  watcher.onDidChange(schedule);
+  watcher.onDidCreate(schedule);
+  watcher.onDidDelete(schedule);
+  context.subscriptions.push(watcher);
 }
 
 export function deactivate(): void {
