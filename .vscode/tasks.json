@@ -2,28 +2,44 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "gitgraph: build vscode (watch)",
+      "label": "gitgraph: build vscode",
       "type": "shell",
-      "command": "bun run --cwd packages/vscode dev",
-      "isBackground": true,
+      "command": "bun run --cwd packages/vscode build",
+      "problemMatcher": [],
       "presentation": {
         "reveal": "silent",
         "panel": "dedicated",
         "showReuseMessage": false,
         "clear": false
-      },
-      "problemMatcher": {
-        "owner": "gitgraph",
-        "pattern": [
-          {
-            "regexp": "^$"
+      }
+    },
+    {
+      "label": "gitgraph: watch vscode",
+      "type": "shell",
+      "command": "bun run --cwd packages/vscode dev",
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "owner": "esbuild",
+          "fileLocation": "absolute",
+          "pattern": {
+            "regexp": "^\\s*✘\\s+\\[(\\w+)\\]\\s+(.+)\\s+\\[(.+):(\\d+):(\\d+)\\]$",
+            "severity": 1,
+            "message": 2,
+            "file": 3,
+            "line": 4,
+            "column": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^\\s*\\[watch\\] build started",
+            "endsPattern": "(Done in|build finished|watching|⚡)"
           }
-        ],
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".",
-          "endsPattern": "(Done in|build finished|watching)"
         }
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
       }
     }
   ]

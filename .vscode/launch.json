@@ -9,7 +9,7 @@
         "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"
       ],
       "outFiles": ["${workspaceFolder}/packages/vscode/dist/**/*.js"],
-      "preLaunchTask": "gitgraph: build vscode (watch)"
+      "preLaunchTask": "gitgraph: build vscode"
     }
   ]
 }
