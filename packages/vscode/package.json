@@ -50,7 +50,8 @@
     "dev": "node esbuild.config.mjs --watch",
     "test": "echo 'no tests yet' && exit 0",
     "typecheck": "tsc -b",
-    "clean": "rm -rf dist dist-types .turbo *.tsbuildinfo"
+    "pack": "node esbuild.config.mjs && vsce package --no-dependencies --skip-license -o gitgraph-vscode-0.1.0.vsix",
+    "clean": "rm -rf dist dist-types .turbo *.tsbuildinfo *.vsix"
   },
   "dependencies": {
     "@gitgraph/core": "workspace:*",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.24.0"
   }
 }

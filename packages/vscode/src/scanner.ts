@@ -56,6 +56,7 @@ export async function scanWorkspace(opts: ScanOptions): Promise<ScanResult> {
   });
   const parsed = new Map<string, ParsedFile>();
   let done = 0;
+  let skipped = 0;
   const reportEvery = Math.max(1, Math.floor(sourcePaths.length / 20));
   for (const rel of sourcePaths) {
     const lang = detectLanguage(rel);
@@ -63,8 +64,11 @@ export async function scanWorkspace(opts: ScanOptions): Promise<ScanResult> {
     try {
       const source = await fs.readFile(path.join(opts.workspaceRoot, rel), "utf8");
       parsed.set(rel, parseFile(rel, source, lang));
-    } catch {
-      // Unreadable file — skip silently. Permissions, symlinks, etc.
+    } catch (err) {
+      // Skip but surface why — silent failures here would mask the kind
+      // of resolver bug a real-world Dart/TS monorepo would expose.
+      skipped++;
+      console.warn(`[gitGraph] skipped ${rel}: ${(err as Error).message}`);
     }
     done++;
     if (done % reportEvery === 0) {
@@ -73,6 +77,11 @@ export async function scanWorkspace(opts: ScanOptions): Promise<ScanResult> {
         progress: 0.2 + 0.5 * (done / sourcePaths.length),
       });
     }
+  }
+  if (skipped > 0) {
+    console.warn(
+      `[gitGraph] ${skipped} file(s) skipped during scan; see warnings above`,
+    );
   }
   const repo: ParsedRepo = { files: parsed };
 

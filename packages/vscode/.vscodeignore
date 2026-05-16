@@ -1,0 +1,19 @@
+# Source — only `dist/` is needed at runtime.
+src/**
+dist-types/**
+tsconfig.json
+*.tsbuildinfo
+vitest.config.ts
+
+# Build tooling
+esbuild.config.mjs
+node_modules/**
+
+# Dev artifacts
+.turbo/**
+*.log
+*.vsix
+.vscode/**
+
+# Source maps bloat the .vsix; users don't need them in a published install.
+dist/**/*.map

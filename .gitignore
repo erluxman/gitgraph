@@ -11,6 +11,10 @@ coverage/
 *.log
 .vscode-test/
 
+# Packaged extension artifacts (built on demand via `bun run pack`)
+*.vsix
+gitgraph-chrome-*.zip
+
 # Local-only bun cache (this sandbox can't use ~/.bun)
 .bun-cache/
 .bun-tmp/
