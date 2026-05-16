@@ -203,6 +203,21 @@ function renderError(
     return;
   }
 
+  // /compare/{base}...{head} returns 404 when one of the refs doesn't
+  // exist, and 422 when the refs share no merge base (unrelated
+  // histories — e.g. branches from different repos). Surface both
+  // separately so the user knows which to fix.
+  if (e instanceof GitHubHttpError && /\/compare\//.test(e.url)) {
+    if (e.status === 404) {
+      status.innerHTML = `<strong>One of the branches doesn't exist.</strong> Open the popup and check the base/compare picks — they may have been deleted or renamed.`;
+      return;
+    }
+    if (e.status === 422) {
+      status.innerHTML = `<strong>No common history between those branches.</strong> Compare needs a shared merge base; pick branches from the same line of work.`;
+      return;
+    }
+  }
+
   status.textContent = `Scan failed: ${(e as Error).message}`;
 }
 

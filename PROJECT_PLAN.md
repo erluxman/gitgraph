@@ -1,5 +1,27 @@
 # gitGraph — Implementation Plan
 
+## Status
+
+| Phase | State | Notes |
+|---|---|---|
+| 0 — Scaffold | ✅ Done | Bun + Turborepo, 5 packages (core, graph-renderer, chrome, vscode, smoke), strict TS, esbuild, vitest |
+| 1 — Core parser | ✅ Done | TS/JS via compiler API, Dart via regex with `part`/`part of`/Flutter widget detection |
+| 2 — Graph engine | ✅ Done | Builder, BFS closure, diff classifier (red/orange/green + distance fade), PageRank + risk scorer with core boost |
+| 3 — Renderer | ⚠️ Mostly | All 5 D3 forces, hover/drag/zoom/pan, filter, progressive scene swap. **Open:** node expansion (click file → children orbit), shape variation by entity kind |
+| 4 — Chrome ext | ✅ Done | PR mode + branch-compare + snapshot, popup picker, progressive rendering, friendly auth errors, packaged via `bun run pack` (→ 1.1 MB .zip). **Deferred:** lazy-load PIXI to shrink content bundle (4 MB → ~50 KB) |
+| 5 — VS Code ext | ✅ Done | Sidebar webview, local scanner, git diff/branch detection, debounced file watcher, F5 dev-host setup, packaged via `bun run pack` (→ 1.21 MB .vsix). **Deferred:** "open in editor tab" command, persist core-path tagging to `.gitgraph.json` |
+| 6 — Polish & testing | 🟡 Started | README ✓, packaging scripts ✓, friendly error boundaries ✓. **Open:** E2E tests (Playwright + VS Code test runner), perf profiling on 500/1000/5000-file repos, visual regression, a11y, Chrome extension icons (currently puzzle piece) |
+
+Test count: **126** across 4 packages (88 core + 24 renderer + 14 chrome).
+
+Known open issues:
+
+- Resolver disagreements in real-world Dart/Flutter projects (reported during user testing; needs investigation in [packages/core/src/graph/resolver.ts](packages/core/src/graph/resolver.ts))
+- Chrome content script is 4 MB minified; loads on every `github.com/*` page since the branch-compare popup needs message-passing
+- VS Code F5 needs `--disable-extensions` to avoid noise from unrelated installed extensions
+
+---
+
 ## Phase 0: Scaffold (Day 1)
 
 **Goal:** Monorepo structure, build tooling, CI basics.

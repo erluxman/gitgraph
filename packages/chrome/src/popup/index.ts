@@ -224,8 +224,16 @@ function shortenUrl(url: string): string {
 
 function describeError(err: unknown): string {
   if (err instanceof Error) {
+    // Rate-limit hit while listing branches — usually means no token.
+    if (err.message.includes("rate limit")) {
+      return "GitHub rate limit hit. Add a token in Settings (60/hr → 5000/hr).";
+    }
+    // 401 / 403 with token present = token mismatch
+    if (err.message.includes("401") || /403/.test(err.message)) {
+      return "GitHub rejected the request. Check the token in Settings — it may be expired or lack access to this repo.";
+    }
     if (err.message.includes("404")) {
-      return "Couldn't read the repo. If it's private, add a token in Settings.";
+      return "Couldn't read the repo. If it's private, add a token in Settings with access to it.";
     }
     return err.message;
   }
