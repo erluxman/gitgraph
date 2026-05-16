@@ -1,0 +1,478 @@
+{
+  "name": "gitGraph",
+  "publicName": "gitGraphing",
+  "version": "0.1.0",
+  "tagline": "Visual diff analysis with dependency-aware risk scoring",
+
+  "coreConcept": {
+    "primaryValueProp": "PR/code review tool that shows change impact beyond text diffs — visualizes which files and features will break",
+    "targetAudience": "Code reviewers, especially after AI-generated commits/PRs",
+    "keyInnovation": "Dependency graph + diff overlay = risk-aware change visualization",
+    "mvpPlatform": "Chrome extension (GitHub PR overlay)",
+    "secondPlatform": "VS Code extension (sidebar + editor tab)"
+  },
+
+  "graphIndex": {
+    "supportedLanguages": [
+      {
+        "language": "TypeScript",
+        "parser": "TypeScript compiler API (ts.createSourceFile)",
+        "nodeDetection": "exported symbols only (export keyword)",
+        "importTracking": "static imports + dynamic import() with string literal paths"
+      },
+      {
+        "language": "JavaScript",
+        "parser": "TypeScript compiler API (allowJs: true)",
+        "nodeDetection": "exported symbols only (export/module.exports)",
+        "importTracking": "static imports + require() with string literal paths + dynamic import()"
+      },
+      {
+        "language": "Dart",
+        "parser": "Custom AST parser (dart-style, no SDK in browser)",
+        "nodeDetection": "non-underscore-prefixed public symbols",
+        "importTracking": "import/export/part/part of directives",
+        "flutterSupport": {
+          "enabled": true,
+          "extras": ["Widget classes", "build() methods", "StatefulWidget lifecycle"]
+        }
+      }
+    ],
+    "indexedEntities": {
+      "file": {
+        "isNode": true,
+        "type": "primary",
+        "metadata": ["path", "language", "lineCount", "exportCount"]
+      },
+      "function": {
+        "isNode": true,
+        "type": "expandable",
+        "filter": "exported/public only",
+        "metadata": ["name", "params", "returnType", "lineNumber"]
+      },
+      "class": {
+        "isNode": true,
+        "type": "expandable",
+        "filter": "exported/public only",
+        "metadata": ["name", "methods", "properties", "lineNumber"]
+      },
+      "variable": {
+        "isNode": true,
+        "type": "expandable",
+        "filter": "exported/public const/let/var and static members",
+        "metadata": ["name", "type", "lineNumber"]
+      }
+    },
+    "edgeTypes": {
+      "staticImport": {
+        "tracked": true,
+        "sources": ["import ... from", "import { } from", "require()"]
+      },
+      "dynamicImport": {
+        "tracked": "best-effort",
+        "rule": "Only when path is string literal, skip computed/template paths"
+      },
+      "reExport": {
+        "tracked": true,
+        "sources": ["export { } from", "export * from"]
+      }
+    },
+    "monorepo": {
+      "supported": true,
+      "crossPackageEdges": true,
+      "detection": "Look for package.json/pubspec.yaml in subdirectories",
+      "workspaceConfigParsing": ["pnpm-workspace.yaml", "package.json workspaces", "lerna.json", "melos.yaml"]
+    },
+    "excludedPaths": {
+      "defaults": [
+        "node_modules", "build", ".git", "dist", ".dart_tool",
+        "package-lock.json", "*.lock", "pnpm-lock.yaml", "bun.lockb",
+        "__pycache__", ".venv", "coverage", ".next", ".nuxt",
+        "*.generated.dart", "*.g.dart", "*.freezed.dart"
+      ],
+      "userConfigurable": true,
+      "configLocation": ".gitgraph.json in repo root"
+    },
+    "caching": {
+      "chromeExtension": "sessionStorage (cleared on tab close)",
+      "vscodeExtension": "workspace storage (persisted)",
+      "invalidation": "On new commits to branch"
+    }
+  },
+
+  "graphVisualization": {
+    "layout": {
+      "type": "force-directed",
+      "style": "Obsidian graph view clone",
+      "physics": {
+        "library": "D3-force",
+        "forces": {
+          "charge": "repulsion between all nodes",
+          "link": "attraction along import edges",
+          "folderGravity": "files in same folder attract each other",
+          "center": "gentle pull toward viewport center",
+          "collision": "prevent node overlap"
+        }
+      },
+      "rendering": {
+        "library": "PIXI.js (WebGL)",
+        "fallback": "Canvas 2D if WebGL unavailable",
+        "targetFPS": 60,
+        "maxNodes": 5000
+      }
+    },
+    "defaultView": {
+      "allFilesVisible": true,
+      "clusteringThreshold": "none (show all files always)",
+      "note": "User can manually zoom/pan for large repos"
+    },
+    "nodeTypes": {
+      "file": {
+        "shape": "circle",
+        "size": "proportional to export count",
+        "label": "filename (no path)",
+        "expandable": true
+      },
+      "function": {
+        "shape": "smaller circle",
+        "size": "fixed small",
+        "label": "function name",
+        "expandBehavior": "orbit around parent file node"
+      },
+      "class": {
+        "shape": "rounded rectangle",
+        "size": "proportional to method count",
+        "label": "class name",
+        "expandBehavior": "orbit around parent file node"
+      },
+      "variable": {
+        "shape": "diamond",
+        "size": "fixed small",
+        "label": "variable name",
+        "expandBehavior": "orbit around parent file node"
+      }
+    },
+    "edges": {
+      "defaultVisibility": "all edges always visible",
+      "style": "curved bezier lines",
+      "thickness": "proportional to number of imports between files",
+      "highlightOnHover": true,
+      "directionIndicator": "subtle arrow at target end"
+    },
+    "interactions": {
+      "click": "expand file to show child nodes (functions/classes/variables)",
+      "ctrlCmdClick": "jump to definition (VS Code: open file, Chrome: GitHub file view)",
+      "rightClick": "context menu: details, mark as core path, copy path",
+      "hover": "highlight all connected edges + show tooltip with file info",
+      "drag": "reposition node (physics pauses for dragged node)",
+      "scroll": "zoom in/out",
+      "middleClickDrag": "pan viewport"
+    },
+    "search": {
+      "enabled": true,
+      "capabilities": [
+        "search by filename",
+        "search by function/class name",
+        "filter: show only files importing X",
+        "filter: show only files in folder Y",
+        "filter: show only files with risk > threshold"
+      ],
+      "ui": "search bar pinned to top of graph view"
+    },
+    "corePathIndicator": {
+      "enabled": true,
+      "style": "glowing border + star badge on node",
+      "manualTagging": true,
+      "storage": ".gitgraph.json in repo root"
+    }
+  },
+
+  "diffAnalysis": {
+    "colorCoding": {
+      "unchanged": {
+        "color": "#4ade80",
+        "label": "green",
+        "meaning": "not affected by this change"
+      },
+      "directlyAffected": {
+        "color": "#ef4444",
+        "label": "red",
+        "meaning": "file appears in the diff (was modified)"
+      },
+      "indirectlyAffected": {
+        "color": "#f97316",
+        "label": "orange",
+        "meaning": "file imports a changed file (transitively) — may break"
+      }
+    },
+    "impactDirection": {
+      "type": "downstream consumers",
+      "definition": "Files that import changed files, transitively",
+      "rationale": "Answers: 'what might break because of this change'",
+      "traversal": "BFS from each changed file, following reverse import edges"
+    },
+    "indirectImpact": {
+      "depth": "full transitive closure",
+      "fadeEffect": {
+        "enabled": true,
+        "startOpacity": 1.0,
+        "endOpacity": 0.2,
+        "basis": "BFS distance from nearest changed file"
+      }
+    },
+    "diffSource": {
+      "chromeExtension": {
+        "primary": "GitHub REST API (GET /repos/{owner}/{repo}/pulls/{pr}/files)",
+        "fallback": "GitHub GraphQL API",
+        "lastResort": "DOM scraping of PR files tab"
+      },
+      "vscodeExtension": {
+        "primary": "git diff via child_process",
+        "prDetection": "GitHub CLI (gh pr view) or manual URL"
+      }
+    }
+  },
+
+  "riskScoring": {
+    "algorithm": {
+      "primary": "PageRank-style centrality on import graph",
+      "secondary": "in-degree count (how many files import this file)",
+      "combined": "weighted sum: 0.7 * pagerank + 0.3 * normalized_indegree"
+    },
+    "display": {
+      "type": "color intensity only",
+      "redIntensity": "darker red = higher risk for directly affected files",
+      "orangeIntensity": "darker orange = higher risk for indirectly affected files",
+      "hoverDetail": "tooltip shows risk context (importers count, centrality rank)"
+    },
+    "corePathBoost": {
+      "enabled": true,
+      "multiplier": 1.5,
+      "storage": ".gitgraph.json"
+    }
+  },
+
+  "chromeExtension": {
+    "priority": "MVP — build first",
+    "manifest": "Manifest V3",
+    "browserSupport": "Chrome only (Chromium-based browsers likely work)",
+    "entryPoint": {
+      "type": "button injected on GitHub PR page",
+      "location": "next to 'Files changed' tab or in PR header area",
+      "action": "opens overlay/modal on current PR page"
+    },
+    "overlay": {
+      "type": "full-screen modal with backdrop blur",
+      "closeable": "X button + Escape key",
+      "layout": "graph takes 100% of modal, toolbar pinned to top",
+      "toolbar": ["search bar", "legend (green/red/orange)", "close button", "settings gear"]
+    },
+    "dataFetching": {
+      "repoTree": {
+        "primary": "GitHub API GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1",
+        "fileContent": "GitHub API GET /repos/{owner}/{repo}/contents/{path}",
+        "optimization": "Only fetch+parse files in dependency chain of changed files",
+        "deepScanToggle": {
+          "enabled": true,
+          "description": "Setting to parse ALL files vs only dependency chain",
+          "default": "light (dependency chain only)"
+        }
+      },
+      "diffData": {
+        "primary": "GitHub API GET /repos/{owner}/{repo}/pulls/{pr}/files",
+        "fallback": "DOM scraping"
+      }
+    },
+    "auth": {
+      "publicRepos": "no auth required (rate-limited to 60 req/hr)",
+      "privateRepos": "GitHub personal access token (stored in chrome.storage.local)",
+      "authenticatedPublic": "optional token for 5000 req/hr rate limit"
+    },
+    "loading": {
+      "strategy": "progressive render",
+      "phases": [
+        "1. Show modal with loading skeleton",
+        "2. Fetch diff files list → render red nodes immediately",
+        "3. Fetch file tree → render all file nodes (green)",
+        "4. Parse imports for changed files → render orange nodes",
+        "5. Expand transitive closure progressively",
+        "6. Run risk scoring → apply color intensity"
+      ]
+    },
+    "features": {
+      "jumpToDefinition": true,
+      "corePathTagging": false,
+      "search": true,
+      "expandCollapseNodes": true
+    },
+    "settings": {
+      "location": "extension popup",
+      "options": [
+        "GitHub token",
+        "excluded paths (override defaults)",
+        "deep scan vs light scan toggle",
+        "physics simulation speed",
+        "default expanded/collapsed"
+      ]
+    }
+  },
+
+  "vscodeExtension": {
+    "priority": "Phase 2 — after Chrome extension stable",
+    "minVersion": "1.80+",
+    "entryPoint": {
+      "sidebar": {
+        "viewId": "gitgraph.graphView",
+        "icon": "custom graph icon in activity bar",
+        "default": true
+      },
+      "editorTab": {
+        "command": "gitGraph.openInEditor",
+        "description": "Pop graph into full editor tab for more space"
+      }
+    },
+    "prDetection": {
+      "primary": "git branch → GitHub CLI (gh pr view --json)",
+      "fallback": "manual command: gitGraph.openPR → paste URL",
+      "branchDiff": "gitGraph.compareBranches → pick two branches"
+    },
+    "indexing": {
+      "trigger": "on workspace open (background)",
+      "reindex": "command: gitGraph.reindex",
+      "storage": "VS Code workspace storage API",
+      "fileWatcher": "watch for file changes, incremental re-index"
+    },
+    "features": {
+      "jumpToDefinition": true,
+      "corePathTagging": true,
+      "search": true,
+      "expandCollapseNodes": true,
+      "reindexCommand": true,
+      "fileWatcher": true
+    }
+  },
+
+  "architecture": {
+    "monorepo": {
+      "tool": "turborepo",
+      "packageManager": "bun",
+      "structure": {
+        "packages/core": "Shared TypeScript core — graph logic, parser, diff analysis, risk scoring",
+        "packages/chrome": "Chrome extension — Manifest V3, imports core",
+        "packages/vscode": "VS Code extension — imports core directly",
+        "packages/graph-renderer": "Shared PIXI.js + D3-force graph rendering"
+      }
+    },
+    "sharedCore": {
+      "language": "TypeScript (strict mode)",
+      "modules": {
+        "parser": "AST parsing for JS/TS/Dart → file/function/class/variable nodes",
+        "graph-builder": "Build adjacency list from parsed imports",
+        "diff-analyzer": "Take diff file list → classify nodes as red/orange/green",
+        "risk-scorer": "PageRank + in-degree → risk scores per node",
+        "transitive-closure": "BFS/DFS to find all downstream consumers"
+      },
+      "chromeUsage": "bundled as ES modules (no WASM needed — pure TS)",
+      "vscodeUsage": "direct TypeScript import"
+    },
+    "graphRenderer": {
+      "shared": true,
+      "stack": "PIXI.js (WebGL) + D3-force (physics)",
+      "api": "receives graph data → renders interactive canvas",
+      "usedBy": ["chrome extension overlay", "vscode webview panel"]
+    },
+    "note": "Dropped WASM plan — pure TS core runs fine in both Chrome and VS Code webviews"
+  },
+
+  "configFile": {
+    "name": ".gitgraph.json",
+    "location": "repo root",
+    "schema": {
+      "excludePaths": ["array of glob patterns to exclude"],
+      "corePaths": ["array of file paths marked as critical"],
+      "languages": {
+        "description": "override language detection",
+        "example": {"src/**/*.mjs": "javascript"}
+      }
+    }
+  },
+
+  "testPlan": {
+    "unitTests": {
+      "framework": "vitest",
+      "coverage": {
+        "parser": [
+          "TS file with exports → correct nodes extracted",
+          "TS file with no exports → no nodes",
+          "JS file with module.exports → correct nodes",
+          "JS file with require() → correct edges",
+          "Dart file with public/private → correct filtering",
+          "Flutter widget file → widget classes detected",
+          "Dynamic import with string literal → edge created",
+          "Dynamic import with variable → edge skipped",
+          "Re-exports → edges traced through",
+          "Circular imports → handled without infinite loop"
+        ],
+        "graphBuilder": [
+          "Simple A→B import → correct adjacency",
+          "Transitive A→B→C → full closure computed",
+          "Monorepo cross-package import → edge created",
+          "Self-import → ignored",
+          "Missing file import → graceful handling"
+        ],
+        "diffAnalyzer": [
+          "Single file changed → correct red/green/orange classification",
+          "Core file changed → many orange nodes",
+          "Leaf file changed → only that file red, rest green",
+          "New file added → red node, no orange (nothing imports it yet)"
+        ],
+        "riskScorer": [
+          "Hub file (many importers) → high score",
+          "Leaf file (no importers) → low score",
+          "Core-tagged file → 1.5x boost applied",
+          "Isolated file → minimal score"
+        ]
+      }
+    },
+    "integrationTests": {
+      "framework": "vitest",
+      "coverage": [
+        "Full pipeline: parse repo → build graph → apply diff → score risk",
+        "Real-world mini repo fixtures (5-10 files each)",
+        "Monorepo fixture with cross-package imports",
+        "Flutter project fixture"
+      ]
+    },
+    "e2eTests": {
+      "chromeExtension": {
+        "framework": "Playwright",
+        "coverage": [
+          "Button appears on GitHub PR page",
+          "Click button → overlay opens with graph",
+          "Graph renders correct number of nodes",
+          "Changed files are red",
+          "Indirect files are orange",
+          "Search filters nodes correctly",
+          "Escape closes overlay"
+        ]
+      },
+      "vscodeExtension": {
+        "framework": "VS Code Extension Test Runner",
+        "coverage": [
+          "Sidebar panel renders graph",
+          "Reindex command works",
+          "Jump to definition opens correct file",
+          "Core path tagging persists"
+        ]
+      }
+    },
+    "visualRegression": {
+      "tool": "Playwright screenshot comparison",
+      "coverage": [
+        "Graph layout consistency (same data → similar layout)",
+        "Color coding correct in diff mode",
+        "Node expand/collapse renders correctly",
+        "Search highlight renders correctly"
+      ]
+    }
+  }
+}
