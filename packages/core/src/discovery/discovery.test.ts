@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../config/index.js";
-import { detectMonorepo, discoverFiles, globToRegex } from "./index.js";
+import {
+  detectMonorepo,
+  discoverFiles,
+  globToRegex,
+  readPackageJsonName,
+  readPubspecName,
+} from "./index.js";
 
 describe("globToRegex", () => {
   it("matches simple filename globs", () => {
@@ -115,5 +121,42 @@ describe("detectMonorepo", () => {
       kind: "single",
       roots: [""],
     });
+  });
+});
+
+describe("readPackageJsonName", () => {
+  it("extracts a scoped name", () => {
+    const body = JSON.stringify({ name: "@scope/pkg", version: "1.0.0" });
+    expect(readPackageJsonName(body)).toBe("@scope/pkg");
+  });
+
+  it("returns null for malformed JSON", () => {
+    expect(readPackageJsonName("not json")).toBeNull();
+  });
+
+  it("returns null when name is missing or not a string", () => {
+    expect(readPackageJsonName("{}")).toBeNull();
+    expect(readPackageJsonName('{"name": 42}')).toBeNull();
+  });
+});
+
+describe("readPubspecName", () => {
+  it("extracts a top-level name", () => {
+    const yaml = `name: my_app\nversion: 1.0.0\n`;
+    expect(readPubspecName(yaml)).toBe("my_app");
+  });
+
+  it("supports quoted names", () => {
+    expect(readPubspecName(`name: "my_app"\n`)).toBe("my_app");
+    expect(readPubspecName(`name: 'my_app'\n`)).toBe("my_app");
+  });
+
+  it("ignores nested name fields", () => {
+    const yaml = `description: foo\ndependencies:\n  name: bar\n`;
+    expect(readPubspecName(yaml)).toBeNull();
+  });
+
+  it("returns null when no name is present", () => {
+    expect(readPubspecName("version: 1.0.0\n")).toBeNull();
   });
 });

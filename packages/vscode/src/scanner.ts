@@ -3,12 +3,16 @@ import {
   analyseDiff,
   buildGraph,
   detectLanguage,
+  detectMonorepo,
   parseConfig,
   parseFile,
+  readPackageJsonName,
+  readPubspecName,
   scoreRisk,
   type GitGraphConfig,
   type ParsedFile,
   type ParsedRepo,
+  type ResolverContext,
 } from "@gitgraph/core";
 import { buildSceneFromCore, type Scene } from "@gitgraph/graph-renderer";
 import * as fs from "node:fs/promises";
@@ -91,7 +95,11 @@ export async function scanWorkspace(opts: ScanOptions): Promise<ScanResult> {
     : await diffFiles(opts.workspaceRoot, baseRef).catch(() => []);
 
   emit({ text: "Building graph…", progress: 0.85 });
-  const graph = buildGraph({ repo });
+  const resolverContext = await buildWorkspaceResolverContext(
+    opts.workspaceRoot,
+    repo,
+  );
+  const graph = buildGraph({ repo, resolverContext });
   const diff = analyseDiff({ graph, changedFiles: changed });
   const risk = scoreRisk(graph, { corePaths: config.corePaths });
 
@@ -118,6 +126,146 @@ async function loadWorkspaceConfig(root: string): Promise<GitGraphConfig> {
     return parseConfig(JSON.parse(raw));
   } catch {
     return DEFAULT_CONFIG;
+  }
+}
+
+/**
+ * Build the maps the resolver needs to turn `@scope/pkg` and
+ * `package:my_app/...` specifiers into in-repo file paths.
+ *
+ * Discovery sources, in priority order:
+ *   1. `pubspec.yaml` at workspace root → single-package Dart project,
+ *      its name maps to the workspace root.
+ *   2. `melos.yaml` packages: globs → each matched dir's pubspec.yaml
+ *      gives a Dart package name.
+ *   3. Root `package.json` workspaces / `pnpm-workspace.yaml` / `lerna.json`
+ *      → each matched dir's package.json gives an npm name.
+ *
+ * If none of these exist, returns an empty context — the resolver will
+ * still handle relative imports correctly; only cross-package edges
+ * become invisible.
+ */
+async function buildWorkspaceResolverContext(
+  root: string,
+  repo: ParsedRepo,
+): Promise<ResolverContext> {
+  const dartPackages = new Map<string, string>();
+  const packages = new Map<string, string>();
+
+  // Single-package Dart at root.
+  await tryReadName(path.join(root, "pubspec.yaml"), readPubspecName).then(
+    (name) => {
+      if (name !== null) dartPackages.set(name, "");
+    },
+  );
+
+  // Single-package JS/TS at root (rare, but possible).
+  await tryReadName(path.join(root, "package.json"), readPackageJsonName).then(
+    (name) => {
+      if (name !== null && !packages.has(name)) packages.set(name, "");
+    },
+  );
+
+  // Monorepo: load the discovery inputs that exist, expand globs against
+  // the directories actually present on disk, then read each child's
+  // package.json / pubspec.yaml for its name.
+  const [pkgJson, pnpm, lerna, melos] = await Promise.all([
+    tryReadFile(path.join(root, "package.json")),
+    tryReadFile(path.join(root, "pnpm-workspace.yaml")),
+    tryReadFile(path.join(root, "lerna.json")),
+    tryReadFile(path.join(root, "melos.yaml")),
+  ]);
+  const layout = detectMonorepo({
+    ...(pkgJson !== null ? { packageJson: pkgJson } : {}),
+    ...(pnpm !== null ? { pnpmWorkspaceYaml: pnpm } : {}),
+    ...(lerna !== null ? { lernaJson: lerna } : {}),
+    ...(melos !== null ? { melosYaml: melos } : {}),
+  });
+  if (layout.kind !== "single") {
+    const matched = await expandWorkspaceGlobs(root, layout.roots);
+    for (const rel of matched) {
+      const abs = path.join(root, rel);
+      const [npmName, dartName] = await Promise.all([
+        tryReadName(path.join(abs, "package.json"), readPackageJsonName),
+        tryReadName(path.join(abs, "pubspec.yaml"), readPubspecName),
+      ]);
+      if (npmName !== null && !packages.has(npmName)) packages.set(npmName, rel);
+      if (dartName !== null && !dartPackages.has(dartName)) dartPackages.set(dartName, rel);
+    }
+  }
+
+  return {
+    files: new Set(repo.files.keys()),
+    packages,
+    dartPackages,
+  };
+}
+
+async function tryReadFile(absPath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(absPath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function tryReadName(
+  absPath: string,
+  extract: (body: string) => string | null,
+): Promise<string | null> {
+  const body = await tryReadFile(absPath);
+  return body !== null ? extract(body) : null;
+}
+
+/**
+ * Expand workspace globs (e.g. `packages/*`, `apps/web`) against the
+ * actual directory tree. Only matches directories — we don't care about
+ * files at this layer.
+ */
+async function expandWorkspaceGlobs(
+  root: string,
+  globs: readonly string[],
+): Promise<readonly string[]> {
+  const out = new Set<string>();
+  for (const glob of globs) {
+    for (const rel of await matchDirGlob(root, glob)) {
+      out.add(rel);
+    }
+  }
+  return [...out];
+}
+
+async function matchDirGlob(
+  root: string,
+  pattern: string,
+): Promise<readonly string[]> {
+  // Only handle the common cases: literal path, or one trailing `*`.
+  // Workspace globs almost always look like `packages/*` or `apps/web`.
+  if (!pattern.includes("*")) {
+    try {
+      const stat = await fs.stat(path.join(root, pattern));
+      return stat.isDirectory() ? [pattern] : [];
+    } catch {
+      return [];
+    }
+  }
+  const slash = pattern.lastIndexOf("/");
+  const parentRel = slash === -1 ? "" : pattern.slice(0, slash);
+  const tail = slash === -1 ? pattern : pattern.slice(slash + 1);
+  if (tail !== "*") {
+    // Unsupported glob shape (e.g. `apps/*-web`) — skip rather than
+    // pull in a glob library for the long tail.
+    return [];
+  }
+  try {
+    const entries = await fs.readdir(path.join(root, parentRel), {
+      withFileTypes: true,
+    });
+    return entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => (parentRel === "" ? e.name : `${parentRel}/${e.name}`));
+  } catch {
+    return [];
   }
 }
 

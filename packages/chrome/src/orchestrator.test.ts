@@ -155,6 +155,91 @@ describe("runScan", () => {
     expect(snap.repo.files.size).toBe(2);
   });
 
+  it("Dart project: package:<root>/... imports resolve via pubspec.yaml", async () => {
+    const contents = new Map<string, string>([
+      ["pubspec.yaml", `name: my_app\nversion: 1.0.0\n`],
+      [
+        "lib/main.dart",
+        `import 'package:my_app/widget.dart';\nclass MainApp {}`,
+      ],
+      ["lib/widget.dart", `class Widget {}`],
+    ]);
+    const fake = new FakeClient(
+      tree([...contents.keys()]),
+      [{ filename: "lib/widget.dart", status: "modified", additions: 1, deletions: 0 }],
+      contents,
+    );
+    const snap = await runScan({
+      client: fake as unknown as GitHubClient,
+      target: { kind: "pr", locator },
+      mode: "deep",
+    });
+    // Before this fix, `package:my_app/widget.dart` would have been a
+    // dangling import. Now the edge exists, so lib/main.dart should be
+    // classified orange (it imports the changed widget).
+    expect(snap.diff?.impacts.get("lib/main.dart")?.kind).toBe("orange");
+    expect(snap.diff?.impacts.get("lib/widget.dart")?.kind).toBe("red");
+    expect(snap.graph?.danglingImports).toEqual([]);
+  });
+
+  it("TS monorepo: @scope/pkg imports resolve via root package.json workspaces", async () => {
+    const contents = new Map<string, string>([
+      [
+        "package.json",
+        JSON.stringify({ name: "root", workspaces: ["packages/*"] }),
+      ],
+      [
+        "packages/core/package.json",
+        JSON.stringify({ name: "@gitgraph/core", version: "0.1.0" }),
+      ],
+      [
+        "packages/core/src/index.ts",
+        `export const core = 1;`,
+      ],
+      [
+        "packages/app/package.json",
+        JSON.stringify({ name: "@gitgraph/app", version: "0.1.0" }),
+      ],
+      [
+        "packages/app/src/index.ts",
+        `import { core } from "@gitgraph/core";\nexport const app = core;`,
+      ],
+    ]);
+    const treeEntries: RepoTreeEntry[] = [
+      ...[...contents.keys()].map(
+        (p) => ({ path: p, type: "blob" as const, sha: "x" }),
+      ),
+      // Dirs needed for expandTreeGlob('packages/*').
+      { path: "packages", type: "tree" as const, sha: "x" },
+      { path: "packages/core", type: "tree" as const, sha: "x" },
+      { path: "packages/app", type: "tree" as const, sha: "x" },
+    ];
+    const fake = new FakeClient(
+      treeEntries,
+      [
+        {
+          filename: "packages/core/src/index.ts",
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+      contents,
+    );
+    const snap = await runScan({
+      client: fake as unknown as GitHubClient,
+      target: { kind: "pr", locator },
+      mode: "deep",
+    });
+    expect(snap.diff?.impacts.get("packages/core/src/index.ts")?.kind).toBe(
+      "red",
+    );
+    expect(snap.diff?.impacts.get("packages/app/src/index.ts")?.kind).toBe(
+      "orange",
+    );
+    expect(snap.graph?.danglingImports).toEqual([]);
+  });
+
   it("aborts mid-scan when the signal is triggered", async () => {
     const fake = new FakeClient(
       tree([]),

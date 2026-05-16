@@ -44,6 +44,47 @@ export interface MonorepoLayout {
 }
 
 /**
+ * For a single discovered package, the name it's imported as.
+ *   - JS/TS: name from `package.json` (e.g. `@scope/pkg`)
+ *   - Dart:  name from `pubspec.yaml` (e.g. `my_app`)
+ *
+ * Either field may be absent — a JS package without a name field, or a
+ * Dart package whose pubspec lacks a name. The resolver uses these to
+ * map bare specifiers (`@scope/pkg`, `package:my_app/...`) back to the
+ * actual directory on disk.
+ */
+export interface PackageManifestInfo {
+  readonly root: string;
+  readonly npmName?: string;
+  readonly dartName?: string;
+}
+
+/**
+ * Parse a JS/TS `package.json` body and extract its `name` field.
+ * Returns null for malformed JSON or unnamed packages.
+ */
+export function readPackageJsonName(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { name?: unknown };
+    return typeof parsed.name === "string" ? parsed.name : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pull the `name:` field out of a Dart `pubspec.yaml`. Dart names are
+ * lowercase_with_underscores by convention; we don't enforce that —
+ * caller takes whatever comes out.
+ */
+export function readPubspecName(body: string): string | null {
+  // YAML top-level `name: foo` or `name: "foo"`. Skip indented matches
+  // (those would be inside a nested object).
+  const match = body.match(/^name\s*:\s*['"]?([A-Za-z0-9_.\-]+)['"]?\s*$/m);
+  return match?.[1] ?? null;
+}
+
+/**
  * Detect whether the repo is a monorepo and which directories are
  * packages. Caller passes in the contents of any of:
  *   - package.json (root)

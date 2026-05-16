@@ -3,7 +3,10 @@ import {
   analyseDiff,
   buildGraph,
   detectLanguage,
+  detectMonorepo,
   parseFile,
+  readPackageJsonName,
+  readPubspecName,
   scoreRisk,
   transitiveImporters,
   type DiffResult,
@@ -12,10 +15,15 @@ import {
   type Language,
   type ParsedFile,
   type ParsedRepo,
+  type ResolverContext,
   type RiskScore,
 } from "@gitgraph/core";
 import type { GitHubClient } from "./github/client.js";
-import type { PrLocator, RepoLocator } from "./github/types.js";
+import type {
+  PrLocator,
+  RepoLocator,
+  RepoTreeEntry,
+} from "./github/types.js";
 
 /**
  * What the scan is comparing. The orchestrator handles three cases
@@ -278,10 +286,20 @@ export async function runScan(opts: RunScanOptions): Promise<ScanSnapshot> {
     repo,
   });
 
+  // Resolve workspace package names BEFORE the first graph build so the
+  // interim closure-completion pass uses real edges, not broken ones.
+  const resolverContext = await buildRepoResolverContext(
+    opts.client,
+    repoLocator,
+    resolved.headSha,
+    tree,
+    repo,
+  );
+
   // For light scan, we can do one more expansion pass: anything that
   // turned out to be in the orange set but wasn't parsed gets fetched.
   if (opts.mode === "light") {
-    const interimGraph = buildGraph({ repo });
+    const interimGraph = buildGraph({ repo, resolverContext });
     const orangeMissing = new Set<string>();
     for (const path of changedPaths) {
       if (!interimGraph.nodes.has(path)) continue;
@@ -301,7 +319,11 @@ export async function runScan(opts: RunScanOptions): Promise<ScanSnapshot> {
     }
   }
 
-  const finalGraph = buildGraph({ repo });
+  const finalResolverContext: ResolverContext = {
+    ...resolverContext,
+    files: new Set(repo.files.keys()),
+  };
+  const finalGraph = buildGraph({ repo, resolverContext: finalResolverContext });
   const finalDiff = analyseDiff({ graph: finalGraph, changedFiles: changedPaths });
   const finalRisk = scoreRisk(finalGraph, { corePaths: config.corePaths });
 
@@ -318,6 +340,159 @@ export async function runScan(opts: RunScanOptions): Promise<ScanSnapshot> {
     risk: finalRisk,
   });
   return snapshot;
+}
+
+/**
+ * Build the `ResolverContext` so the graph resolver can map bare
+ * specifiers (`@scope/pkg`, `package:my_app/...`) back to files in the
+ * tree. Without this, the resolver returns null for every such import
+ * and the graph misses every cross-package edge.
+ *
+ * Strategy: find manifest files (`package.json`, `pubspec.yaml`) in the
+ * tree, fetch the small subset of them that name a package, and map
+ * each name to its directory. Falls back gracefully on a 404 / parse
+ * error — the import just stays unresolved.
+ */
+async function buildRepoResolverContext(
+  client: GitHubClient,
+  locator: RepoLocator,
+  sha: string,
+  tree: readonly RepoTreeEntry[],
+  repo: ParsedRepo,
+): Promise<ResolverContext> {
+  // 1. Discover layout from root manifest files.
+  const rootJson = treeContent(tree, "package.json");
+  const rootPnpm = treeContent(tree, "pnpm-workspace.yaml");
+  const rootLerna = treeContent(tree, "lerna.json");
+  const rootMelos = treeContent(tree, "melos.yaml");
+
+  const layoutInputs: Record<string, string> = {};
+  await Promise.all([
+    fetchOptional(client, locator, sha, rootJson, "packageJson", layoutInputs),
+    fetchOptional(client, locator, sha, rootPnpm, "pnpmWorkspaceYaml", layoutInputs),
+    fetchOptional(client, locator, sha, rootLerna, "lernaJson", layoutInputs),
+    fetchOptional(client, locator, sha, rootMelos, "melosYaml", layoutInputs),
+  ]);
+  const layout = detectMonorepo(layoutInputs);
+
+  // 2. Decide which directories are packages. For "single", that's just
+  // the root. For monorepo modes, expand globs against the tree's blob
+  // paths.
+  const packageDirs = new Set<string>();
+  if (layout.kind === "single") {
+    packageDirs.add("");
+  } else {
+    for (const glob of layout.roots) {
+      for (const dir of expandTreeGlob(tree, glob)) packageDirs.add(dir);
+    }
+    // Always also probe the root, in case a non-workspace package.json
+    // names the umbrella project (rare but cheap to check).
+    packageDirs.add("");
+  }
+
+  // 3. For each package dir, fetch its package.json and pubspec.yaml if
+  // present, extract names, and store in the appropriate map.
+  const packages = new Map<string, string>();
+  const dartPackages = new Map<string, string>();
+
+  const dirs = [...packageDirs];
+  await Promise.all(
+    dirs.map(async (dir) => {
+      const pkgJsonPath = dir === "" ? "package.json" : `${dir}/package.json`;
+      const pubspecPath = dir === "" ? "pubspec.yaml" : `${dir}/pubspec.yaml`;
+      const [pkgBody, pubBody] = await Promise.all([
+        treeHas(tree, pkgJsonPath)
+          ? safeFetch(client, locator, sha, pkgJsonPath)
+          : null,
+        treeHas(tree, pubspecPath)
+          ? safeFetch(client, locator, sha, pubspecPath)
+          : null,
+      ]);
+      if (pkgBody !== null) {
+        const name = readPackageJsonName(pkgBody);
+        if (name !== null && !packages.has(name)) packages.set(name, dir);
+      }
+      if (pubBody !== null) {
+        const name = readPubspecName(pubBody);
+        if (name !== null && !dartPackages.has(name)) dartPackages.set(name, dir);
+      }
+    }),
+  );
+
+  return {
+    files: new Set(repo.files.keys()),
+    packages,
+    dartPackages,
+  };
+}
+
+function treeHas(tree: readonly RepoTreeEntry[], path: string): boolean {
+  return tree.some((e) => e.type === "blob" && e.path === path);
+}
+
+function treeContent(tree: readonly RepoTreeEntry[], path: string): string | null {
+  return treeHas(tree, path) ? path : null;
+}
+
+async function fetchOptional(
+  client: GitHubClient,
+  locator: RepoLocator,
+  sha: string,
+  path: string | null,
+  key: string,
+  out: Record<string, string>,
+): Promise<void> {
+  if (path === null) return;
+  const body = await safeFetch(client, locator, sha, path);
+  if (body !== null) out[key] = body;
+}
+
+async function safeFetch(
+  client: GitHubClient,
+  locator: RepoLocator,
+  sha: string,
+  path: string,
+): Promise<string | null> {
+  try {
+    return await client.getFileContent(locator, sha, path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tiny tree-aware glob expander for workspace patterns. Same shape
+ * limits as the VS Code scanner (literal path or trailing `*`).
+ */
+function expandTreeGlob(
+  tree: readonly RepoTreeEntry[],
+  glob: string,
+): readonly string[] {
+  if (!glob.includes("*")) {
+    return tree.some((e) => e.type === "tree" && e.path === glob) ? [glob] : [];
+  }
+  const slash = glob.lastIndexOf("/");
+  const parent = slash === -1 ? "" : glob.slice(0, slash);
+  const tail = slash === -1 ? glob : glob.slice(slash + 1);
+  if (tail !== "*") return [];
+  const out: string[] = [];
+  for (const entry of tree) {
+    if (entry.type !== "tree") continue;
+    if (parent === "") {
+      // Top-level: name must have no slash.
+      if (!entry.path.includes("/")) out.push(entry.path);
+    } else {
+      // Direct child of `parent`.
+      const prefix = parent + "/";
+      if (
+        entry.path.startsWith(prefix) &&
+        !entry.path.slice(prefix.length).includes("/")
+      ) {
+        out.push(entry.path);
+      }
+    }
+  }
+  return out;
 }
 
 async function parsePaths(
