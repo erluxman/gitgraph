@@ -51,6 +51,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     switch (message.kind) {
       case "ready":
         await this.runScan();
+        await this.pushBranches();
         return;
       case "refresh":
         await this.runScan();
@@ -62,6 +63,42 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // Placeholder: persist to `.gitgraph.json`. Out of scope for the
         // first slice — we surface the action but no-op for now.
         return;
+      case "listBranches":
+        await this.pushBranches();
+        return;
+      case "setCompare":
+        // The scanner's `baseBranch` field controls the diff target —
+        // we just point it at the user's pick. `head` is the working
+        // tree (HEAD) by convention, so passing `head` here doesn't do
+        // anything different yet. In a later round we could honour it
+        // to support "compare branch X to branch Y" without checking
+        // them out.
+        await this.refresh(message.base);
+        return;
+    }
+  }
+
+  /** Push the local branch list to the webview's controls panel. */
+  private async pushBranches(): Promise<void> {
+    const root = this.firstWorkspaceFolder();
+    if (root === null) return;
+    try {
+      const [{ getGitInfo }, { listBranches }] = await Promise.all([
+        import("./git.js"),
+        import("./git.js"),
+      ]);
+      const [branches, info] = await Promise.all([
+        listBranches(root),
+        getGitInfo(root),
+      ]);
+      this.post({
+        kind: "branches",
+        branches,
+        currentBase: this.currentBaseBranch ?? info.defaultBase,
+        currentHead: info.currentBranch,
+      });
+    } catch (err) {
+      console.warn("[gitGraph] couldn't push branches", err);
     }
   }
 

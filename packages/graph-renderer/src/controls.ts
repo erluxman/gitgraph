@@ -14,6 +14,12 @@ import type { Scene } from "./types.js";
 export interface ControlsPanelHandle {
   /** Update the search index after a setScene() — call from the host. */
   updateScene(scene: Scene): void;
+  /**
+   * Replace the branch dropdowns' options (e.g. after a refresh fetched
+   * a new branch list). No-op if the panel was mounted without a branch
+   * selector.
+   */
+  setBranchSelector(opts: BranchSelectorOptions): void;
   /** Remove the panel from the DOM. */
   destroy(): void;
 }
@@ -23,6 +29,29 @@ export interface ControlsPanelOptions {
   readonly scene: Scene;
   /** Where the panel anchors. */
   readonly position?: "top-right" | "top-left" | "bottom-right" | "bottom-left";
+  /**
+   * Optional in-panel branch selector. When provided, the panel renders
+   * a "Compare branches" section with two dropdowns (base + head) and an
+   * Apply button. The host owns branch discovery and re-scanning — the
+   * panel just collects the user's pick and calls back.
+   *
+   * Pass `currentHead = ""` (or omit it) to default to a snapshot of
+   * `currentBase`. The host can update the list later via
+   * `handle.setBranchSelector(...)` after a successful re-scan.
+   */
+  readonly branchSelector?: BranchSelectorOptions;
+}
+
+export interface BranchSelectorOptions {
+  readonly branches: readonly string[];
+  readonly currentBase: string;
+  readonly currentHead?: string;
+  /**
+   * Called when the user clicks Apply. `head` is empty string when the
+   * user wants a snapshot view of `base`. Return a promise so the panel
+   * can show a loading state.
+   */
+  readonly onApply: (base: string, head: string) => Promise<void>;
 }
 
 export function mountControlsPanel(
@@ -51,6 +80,9 @@ export function mountControlsPanel(
       <span class="gg-controls__toggle" style="font-size:14px;line-height:1;color:#94a3b8;">−</span>
     </div>
     <div class="gg-controls__body" style="padding:10px 12px;width:240px;">
+      <!-- Compare branches (populated by setBranchSelector) -->
+      <div class="gg-controls__branches" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1f2937;"></div>
+
       <!-- Search -->
       <label style="display:block;color:#9ca3af;margin-bottom:4px;">Search files <span style="color:#6b7280;font-size:10px;margin-left:4px;">⌘K to open palette</span></label>
       <div class="gg-controls__chips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
@@ -245,6 +277,81 @@ export function mountControlsPanel(
   wireForce(root, "link", (v) => handle.setForceStrengths({ link: v }));
   wireForce(root, "collision", (v) => handle.setForceStrengths({ collision: v }));
 
+  // --- Branch selector (optional) ---
+  const branchesBox = root.querySelector<HTMLDivElement>(".gg-controls__branches")!;
+  let branchOpts: BranchSelectorOptions | null = null;
+
+  function renderBranchSelector(): void {
+    if (branchOpts === null) {
+      branchesBox.style.display = "none";
+      branchesBox.innerHTML = "";
+      return;
+    }
+    branchesBox.style.display = "";
+    const { branches, currentBase, currentHead = "" } = branchOpts;
+    const baseOptions = optionsHtml(branches, currentBase);
+    const headOptions = optionsHtml([""].concat([...branches]), currentHead);
+
+    branchesBox.innerHTML = `
+      <label style="display:block;color:#9ca3af;margin-bottom:4px;">Compare branches</label>
+      <div style="margin-bottom:4px;">
+        <label style="font-size:10px;color:#6b7280;">Base</label>
+        <select class="gg-controls__base" style="width:100%;padding:4px 6px;background:#111827;color:#e5e7eb;border:1px solid #1f2937;border-radius:4px;font-size:12px;">${baseOptions}</select>
+      </div>
+      <div style="margin-bottom:6px;">
+        <label style="font-size:10px;color:#6b7280;">Compare with <span style="color:#6b7280;">(optional)</span></label>
+        <select class="gg-controls__head" style="width:100%;padding:4px 6px;background:#111827;color:#e5e7eb;border:1px solid #1f2937;border-radius:4px;font-size:12px;">${headOptions}</select>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="gg-controls__apply" type="button"
+          style="flex:1;padding:4px 10px;background:linear-gradient(180deg,#1e40af,#1e3a8a);color:#fff;border:0;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">Apply</button>
+        <span class="gg-controls__apply-status" style="font-size:10px;color:#9ca3af;flex:0 0 auto;"></span>
+      </div>
+    `;
+
+    const baseSel = branchesBox.querySelector<HTMLSelectElement>(".gg-controls__base")!;
+    const headSel = branchesBox.querySelector<HTMLSelectElement>(".gg-controls__head")!;
+    const button = branchesBox.querySelector<HTMLButtonElement>(".gg-controls__apply")!;
+    const status = branchesBox.querySelector<HTMLSpanElement>(".gg-controls__apply-status")!;
+    button.addEventListener("click", async () => {
+      if (branchOpts === null) return;
+      const base = baseSel.value;
+      const head = headSel.value;
+      button.disabled = true;
+      status.style.color = "#9ca3af";
+      status.textContent = head === "" || head === base ? "Loading…" : `${base} → ${head}…`;
+      try {
+        await branchOpts.onApply(base, head);
+        status.textContent = "";
+      } catch (err) {
+        status.style.color = "#fca5a5";
+        status.textContent = (err as Error).message ?? "failed";
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  function optionsHtml(items: readonly string[], selected: string): string {
+    return items
+      .map((item) => {
+        const safe = escapeAttr(item);
+        const label = item === "" ? "(snapshot — no comparison)" : safe;
+        const sel = item === selected ? " selected" : "";
+        return `<option value="${safe}"${sel}>${label}</option>`;
+      })
+      .join("");
+  }
+
+  function escapeAttr(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+
+  if (opts.branchSelector !== undefined) {
+    branchOpts = opts.branchSelector;
+    renderBranchSelector();
+  }
+
   // --- Cmd+L (or `[`) toggles panel visibility from anywhere ---
   const togglePanelKey = (e: KeyboardEvent): void => {
     if (isTypingInInput(e.target)) return;
@@ -261,6 +368,10 @@ export function mountControlsPanel(
     updateScene(next) {
       scene = next;
       renderResults();
+    },
+    setBranchSelector(next) {
+      branchOpts = next;
+      renderBranchSelector();
     },
     destroy() {
       document.removeEventListener("keydown", togglePanelKey);

@@ -1,7 +1,11 @@
 import {
   buildSceneFromCore,
   buildSkeletonScene,
+  mountCommandPalette,
+  mountControlsPanel,
   mountRenderer,
+  type CommandPaletteHandle,
+  type ControlsPanelHandle,
   type RendererHandle,
 } from "@gitgraph/graph-renderer";
 import {
@@ -43,6 +47,9 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
   const canvasHost = root.querySelector<HTMLDivElement>(".gg-canvas")!;
 
   let handle: RendererHandle | null = null;
+  let panel: ControlsPanelHandle | null = null;
+  let palette: CommandPaletteHandle | null = null;
+  let activeTarget: ScanTarget = target;
   // We mount the renderer once with a skeleton scene as soon as we
   // have tree paths, then call setScene() with the final scene at done.
   // Both steps are kicked off from inside `emit`, which is sync — so
@@ -129,6 +136,23 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
         }
         console.log("[gitGraph] final scene applied", handle);
         renderFilesPanel(root, completed);
+        // Mount the controls panel + palette the first time the final
+        // scene lands. Subsequent re-scans (via the branch picker)
+        // only need updateScene().
+        // Same closure-narrowing trick used elsewhere in this file:
+        // capturing `panel`/`palette` in inner async functions confuses
+        // TS, so we cast them through an alias.
+        const existingPanel = panel as ControlsPanelHandle | null;
+        const existingPalette = palette as CommandPaletteHandle | null;
+        if (existingPanel === null && handle !== null) {
+          panel = mountControlsPanel(canvasHost, handle, { scene });
+          palette = mountCommandPalette(canvasHost, handle, { scene });
+          // Fire-and-forget — the branch list comes back async.
+          void wireBranchPicker(panel, client, locator, activeTarget, applyTarget);
+        } else {
+          existingPanel?.updateScene(scene);
+          existingPalette?.updateScene(scene);
+        }
         status.style.color = "";
         status.textContent = `${completed.repo.files.size} files parsed · ${completed.changedFiles.length} changed`;
       })();
@@ -145,8 +169,105 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
     aborter.abort();
     document.removeEventListener("keydown", onKey);
     handle?.destroy();
+    panel?.destroy();
+    palette?.destroy();
     root.remove();
     document.body.style.overflow = "";
+  }
+
+  /**
+   * Re-run the scan with a new ScanTarget (branch swap from the panel).
+   * Mirrors the original orchestrator wiring but feeds the result back
+   * into the existing renderer via setScene().
+   */
+  async function applyTarget(next: ScanTarget): Promise<void> {
+    if (handle === null) throw new Error("renderer not ready");
+    activeTarget = next;
+    status.style.color = "";
+    status.textContent = "Re-scanning…";
+    const snap = await runScan({
+      client,
+      target: next,
+      mode: resolveMode(settings),
+      signal: aborter.signal,
+      emit(s) {
+        status.textContent = `${s.message} (${Math.round(s.progress * 100)}%)`;
+      },
+    });
+    if (
+      snap.graph === null ||
+      snap.diff === null ||
+      snap.risk === null
+    ) {
+      throw new Error("re-scan returned no graph");
+    }
+    const newScene = buildSceneFromCore({
+      graph: snap.graph,
+      diff: snap.diff,
+      risk: snap.risk,
+    });
+    await handle.setScene(newScene);
+    panel?.updateScene(newScene);
+    palette?.updateScene(newScene);
+    renderFilesPanel(root, snap);
+    status.textContent = `${snap.repo.files.size} files parsed · ${snap.changedFiles.length} changed`;
+  }
+}
+
+/**
+ * Fetch the repo's branches and feed them to the controls panel's
+ * branch selector. Picks sensible defaults based on the current scan
+ * target: a PR scan defaults to its base/head; a snapshot defaults to
+ * the snapshot ref + no compare.
+ */
+async function wireBranchPicker(
+  panel: ControlsPanelHandle,
+  client: GitHubClient,
+  locator: RepoLocator,
+  currentTarget: ScanTarget,
+  apply: (next: ScanTarget) => Promise<void>,
+): Promise<void> {
+  try {
+    const branches = await client.listBranches(locator);
+    const names = branches.map((b) => b.name);
+    const { currentBase, currentHead } = await deriveCurrentBranches(
+      client,
+      locator,
+      currentTarget,
+    );
+    panel.setBranchSelector({
+      branches: names,
+      currentBase,
+      currentHead,
+      async onApply(base, head) {
+        if (head === "" || head === base) {
+          await apply({ kind: "snapshot", locator, ref: base });
+        } else {
+          await apply({ kind: "compare", locator, base, head });
+        }
+      },
+    });
+  } catch (err) {
+    // Don't break the overlay — just leave the picker empty. The user
+    // can still use everything else.
+    console.warn("[gitGraph] couldn't load branches", err);
+  }
+}
+
+async function deriveCurrentBranches(
+  client: GitHubClient,
+  _locator: RepoLocator,
+  target: ScanTarget,
+): Promise<{ currentBase: string; currentHead: string }> {
+  switch (target.kind) {
+    case "pr": {
+      const meta = await client.getPr(target.locator);
+      return { currentBase: meta.base.ref, currentHead: meta.head.ref };
+    }
+    case "compare":
+      return { currentBase: target.base, currentHead: target.head };
+    case "snapshot":
+      return { currentBase: target.ref, currentHead: "" };
   }
 }
 

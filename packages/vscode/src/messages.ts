@@ -39,6 +39,13 @@ export type HostToWebview =
         readonly totalFiles: number;
         readonly baseRef: string;
       };
+    }
+  | {
+      /** Push the current local branch list to the webview's panel. */
+      readonly kind: "branches";
+      readonly branches: readonly string[];
+      readonly currentBase: string;
+      readonly currentHead: string;
     };
 
 /** Messages from the webview → extension host. */
@@ -46,4 +53,11 @@ export type WebviewToHost =
   | { readonly kind: "ready" }
   | { readonly kind: "refresh" }
   | { readonly kind: "jumpTo"; readonly path: string; readonly line?: number }
-  | { readonly kind: "toggleCorePath"; readonly path: string };
+  | { readonly kind: "toggleCorePath"; readonly path: string }
+  | { readonly kind: "listBranches" }
+  | {
+      /** Apply a new base/head pair from the panel and re-scan. */
+      readonly kind: "setCompare";
+      readonly base: string;
+      readonly head: string;
+    };
