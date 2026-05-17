@@ -63,7 +63,6 @@ export interface RendererHandle {
 }
 
 const EDGE_COLOUR = 0x4b5563;
-const EDGE_ALPHA = 0.45;
 const EDGE_HIGHLIGHT_COLOUR = 0xfbbf24;
 const FADED_ALPHA = 0.15;
 
@@ -470,6 +469,10 @@ export async function mountRenderer(
 
   function drawEdges(): void {
     edgeLayer.clear();
+    // Edges are now a hover-only affordance: when nothing is hovered we
+    // skip painting entirely. The graph reads as just nodes; the
+    // dependency wiring reveals itself when the user starts pointing.
+    if (hoverId === null) return;
     const bounds = visibleSceneBounds();
     for (const edge of currentScene.edges) {
       const a = sceneNode(edge.source);
@@ -486,40 +489,32 @@ export async function mountRenderer(
       const bIn = inBounds(b.x, b.y, bounds);
       if (!aIn && !bIn) continue;
 
-      // Edge highlighting picks the most informative mode:
-      //   1. Hovering a red/orange node → blame chain. Edges along the
-      //      DOWN walk (this file depends on X, X depends on Y, … red)
-      //      draw SOLID; edges along the UP walk (Z depends on this
-      //      file, W depends on Z, …) draw DOTTED. Two styles answer two
-      //      different questions: "why am I yellow" vs "who do I drag".
-      //   2. Hovering anything else → direct edges only, single solid
-      //      style. Neighbour-of-neighbour edges stay un-highlighted.
-      const someoneHovered = hoverId !== null;
-      const blameActive = blameEdgesDown !== null;
+      // Uniform highlight rule, applied identically regardless of the
+      // hovered file's colour:
+      //   SOLID — edge is in the DOWN set ("hovered depends on …").
+      //           For orange that's the full distance-decreasing chain
+      //           to red; for green/red it's just the direct imports.
+      //   DOTTED — edge is in the UP set ("… depends on hovered"),
+      //            direct importers only.
+      //   FAINT — every other edge, dimmed so the chain pops.
       const key = edgeKey(a.id, b.id);
-      const isDown = blameActive && blameEdgesDown!.has(key);
-      const isUp = blameActive && blameEdgesUp!.has(key);
-      const isBlame = isDown || isUp;
-      const isDirect =
-        !blameActive && someoneHovered && (a.id === hoverId || b.id === hoverId);
-      const baseAlpha = blameActive
-        ? (isBlame ? 0.95 : 0.04)
-        : someoneHovered
-          ? (isDirect ? 0.95 : 0.08)
-          : EDGE_ALPHA;
-      const colour = isBlame || isDirect ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
+      const isDown = blameEdgesDown !== null && blameEdgesDown.has(key);
+      const isUp = blameEdgesUp !== null && blameEdgesUp.has(key);
+      const isHighlight = isDown || isUp;
+      const alpha = isHighlight ? 0.95 : 0.04;
+      const colour = isHighlight ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
       const width = Math.max(0.5, edge.weight * 0.8);
       if (isUp) {
         // Dotted: lay down a sequence of dash segments and stroke them
         // all with the same style. Dash/gap chosen so dashes read as
         // dotted at default zoom but stay readable when zoomed out.
         drawDashedSegment(edgeLayer, a.x, a.y, b.x, b.y, 4, 3);
-        edgeLayer.stroke({ color: colour, alpha: baseAlpha, width });
+        edgeLayer.stroke({ color: colour, alpha, width });
       } else {
         edgeLayer
           .moveTo(a.x, a.y)
           .lineTo(b.x, b.y)
-          .stroke({ color: colour, alpha: baseAlpha, width });
+          .stroke({ color: colour, alpha, width });
       }
     }
   }
@@ -841,21 +836,25 @@ export async function mountRenderer(
   }
 
   /**
-   * Compute the blame chain for the currently hovered node, walking
-   * BOTH directions so direction is visible in the highlight:
+   * Compute the blame chain for the currently hovered node. Edges are
+   * grouped by direction so the renderer can style them uniformly
+   * regardless of which colour the hovered file is:
    *
-   *   DOWN (toward red, drawn SOLID) — walk outgoing edges, only
-   *   descending to neighbours whose distance is current − 1. Tells the
-   *   user "this file depends on X, which depends on Y, …, which is
-   *   the red change". Empty for red nodes (already at distance 0).
+   *   DOWN (drawn SOLID) — edges where the hovered file is the source
+   *   ("what this file depends on"). For an orange file the walk
+   *   continues all the way to a red origin via the distance gradient;
+   *   for green/red files the walk stops at the direct imports.
    *
-   *   UP (toward consumers, drawn DOTTED) — walk incoming edges, only
-   *   ascending to neighbours whose distance is current + 1. Tells the
-   *   user "Z depends on this file, W depends on Z, …" — the propagation
-   *   cone.
+   *   UP (drawn DOTTED) — edges where the hovered file is the target,
+   *   one level out only ("what depends on this file"). For orange/red
+   *   we keep the distance gradient so we only surface consumers whose
+   *   shortest red-path actually runs through the hovered file; for
+   *   green there's no gradient to respect, so all direct importers
+   *   show up.
    *
-   * Green / no hover clears blame state; drawEdges falls back to its
-   * direct-edge highlight for green hover.
+   * When `hoverId` is null we clear all three sets and `drawEdges`
+   * stops painting edges entirely — by design, edges are a hover-only
+   * affordance now.
    */
   function recomputeBlame(): void {
     blameNodes = null;
@@ -864,16 +863,16 @@ export async function mountRenderer(
     if (hoverId === null) return;
     const node = nodeById.get(hoverId);
     if (node === undefined) return;
-    if (node.impact === "green") return;
-    if (!Number.isFinite(node.distance)) return;
 
     const nodes = new Set<string>([node.id]);
     const down = new Set<string>();
     const up = new Set<string>();
 
-    // DOWN walk — only meaningful when there's somewhere lower to go
-    // (distance > 0). For a red node this loop body never runs.
-    if (node.distance > 0) {
+    // DOWN — orange files walk the full distance-decreasing chain to
+    // their red origin; green/red files just take their direct imports.
+    const orangeChain =
+      node.impact === "orange" && Number.isFinite(node.distance) && node.distance > 0;
+    if (orangeChain) {
       const seen = new Set<string>([node.id]);
       const queue: string[] = [node.id];
       while (queue.length > 0) {
@@ -886,8 +885,6 @@ export async function mountRenderer(
           const tNode = nodeById.get(tId);
           if (tNode === undefined) continue;
           if (tNode.distance !== cur.distance - 1) continue;
-          // Edges are stored (importer → imported); curId is the
-          // importer, tId is the imported.
           down.add(edgeKey(curId, tId));
           if (!seen.has(tId)) {
             seen.add(tId);
@@ -896,25 +893,33 @@ export async function mountRenderer(
           }
         }
       }
+    } else {
+      const outs = outgoingIds.get(node.id);
+      if (outs !== undefined) {
+        for (const tId of outs) {
+          down.add(edgeKey(node.id, tId));
+          nodes.add(tId);
+        }
+      }
     }
 
-    // UP walk — DIRECT importers only (one level out). Full transitive
-    // chain on the dotted side made the highlight too noisy; capping at
-    // one step keeps the cause-side (solid) the protagonist while still
-    // answering "who does this propagate to next". Distance filter stays
-    // so we only show consumers whose shortest red-path runs through
-    // the hovered file.
-    {
-      const ins = incomingIds.get(node.id);
-      if (ins !== undefined) {
-        for (const sId of ins) {
-          const sNode = nodeById.get(sId);
-          if (sNode === undefined) continue;
+    // UP — direct importers only (one level). For orange/red keep the
+    // distance gradient so we don't surface consumers that have a
+    // shorter blame chain through some other file. For green there's no
+    // gradient to honour, so every direct importer shows up.
+    const enforceDistance =
+      node.impact !== "green" && Number.isFinite(node.distance);
+    const ins = incomingIds.get(node.id);
+    if (ins !== undefined) {
+      for (const sId of ins) {
+        const sNode = nodeById.get(sId);
+        if (sNode === undefined) continue;
+        if (enforceDistance) {
           if (!Number.isFinite(sNode.distance)) continue;
           if (sNode.distance !== node.distance + 1) continue;
-          up.add(edgeKey(sId, node.id));
-          nodes.add(sId);
         }
+        up.add(edgeKey(sId, node.id));
+        nodes.add(sId);
       }
     }
 
