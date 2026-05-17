@@ -59,8 +59,8 @@ export interface LayoutHandle {
  */
 export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
   const { width, height } = opts;
-  const chargeStrength = opts.chargeStrength ?? -180;
-  const linkDistance = opts.linkDistance ?? 60;
+  const chargeStrength = opts.chargeStrength ?? -300;
+  const linkDistance = opts.linkDistance ?? 75;
   const folderStrength = opts.folderStrength ?? 0.04;
   const alphaDecay = opts.alphaDecay ?? 0.025;
 
@@ -82,7 +82,19 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
     )
     .force("charge", forceManyBody<SceneNode>().strength(chargeStrength))
     .force("center", forceCenter(width / 2, height / 2).strength(0.05))
-    .force("collide", forceCollide<SceneNode>().radius((n) => nodeStyle(n).radius + 2))
+    // Collision radius accounts for the label and file-type icon
+    // rendered below each node — d3-force's collision is circular and
+    // doesn't know about the label rectangle, so we just pad the
+    // effective radius by ~14 px to leave room for it. Iterations 3
+    // (default 1) makes the constraint actually resolved within a
+    // single tick instead of slowly relaxing over many.
+    .force(
+      "collide",
+      forceCollide<SceneNode>()
+        .radius((n) => nodeStyle(n).radius + (n.kind === "child" ? 4 : 14))
+        .strength(1)
+        .iterations(3),
+    )
     // Folder gravity: x/y attractors per node, pointing at the folder centroid.
     .force(
       "folderX",
