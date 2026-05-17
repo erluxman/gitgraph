@@ -504,6 +504,8 @@ export async function mountRenderer(
       //   "never"   → no labels at all
       //   "auto"    → only the N nodes nearest the pointer
       // Filter-dimmed nodes never show their labels either way.
+      // The hovered node ALWAYS shows its label regardless of mode —
+      // when the user's pointer is on a node, they want to know which.
       const showLabel =
         labelMode === "never"
           ? false
@@ -511,12 +513,24 @@ export async function mountRenderer(
             ? false
             : labelMode === "always"
               ? true
-              : nearbyLabelIds.has(node.id);
+              : nearbyLabelIds.has(node.id) || node.id === hoverId;
+
+      // Hover spotlight: the hovered node's label grows ~30% and
+      // stays fully opaque; every other visible label fades to 50%
+      // so the eye is pulled to the one under the cursor.
+      const isHovered = node.id === hoverId;
+      const hoverDim = hoverId !== null && !isHovered ? 0.5 : 1;
+      const labelScale = isHovered ? 1.3 : 1;
+
       label.visible = showLabel;
-      label.alpha = showLabel ? 0.85 * fadeIn : 0;
+      label.alpha = showLabel ? 0.85 * fadeIn * hoverDim : 0;
+      label.scale.set(labelScale);
       if (iconView !== undefined) {
         iconView.visible = showLabel;
-        iconView.alpha = showLabel ? 0.85 * fadeIn : 0;
+        iconView.alpha = showLabel ? 0.85 * fadeIn * hoverDim : 0;
+        // iconView is a Container; the inner Graphics already has the
+        // base BADGE_PX/24 scale baked in. We just multiply on top.
+        iconView.scale.set(labelScale);
       }
 
       // Brief pulse highlight after focusNode — scale + fade in/out.
