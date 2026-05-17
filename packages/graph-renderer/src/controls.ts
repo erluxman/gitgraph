@@ -137,6 +137,15 @@ export function mountControlsPanel(
       ${forceSliderHtml("charge", "Charge (repulsion)", 0.2, 3, 1)}
       ${forceSliderHtml("link", "Link strength", 0.2, 3, 1)}
       ${forceSliderHtml("collision", "Collision", 0.5, 2, 1)}
+
+      <hr style="border:0;border-top:1px solid #1f2937;margin:12px 0;" />
+
+      <!-- Viscosity: lower = more jiggle when zooming/panning -->
+      <label style="display:flex;align-items:center;gap:8px;color:#6b7280;font-size:11px;margin:4px 0;" title="Lower = looser / more wobble on pan-zoom. Higher = stiffer / settles fast.">
+        Viscosity
+        <input class="gg-controls__viscosity" type="range" min="0" max="1" step="0.05" value="0.8" style="flex:1;" />
+        <span class="gg-controls__viscosity-val" style="width:30px;text-align:right;">0.80</span>
+      </label>
     </div>
   `;
   host.appendChild(root);
@@ -367,6 +376,15 @@ export function mountControlsPanel(
   wireForce(root, "collision", (v) =>
     handle.setForceStrengths({ collision: v }),
   );
+
+  // --- Viscosity (jiggle on pan/zoom) ---
+  const viscInput = root.querySelector<HTMLInputElement>(".gg-controls__viscosity")!;
+  const viscVal = root.querySelector<HTMLSpanElement>(".gg-controls__viscosity-val")!;
+  viscInput.addEventListener("input", () => {
+    const v = Number(viscInput.value);
+    viscVal.textContent = v.toFixed(2);
+    handle.setViscosity(v);
+  });
 
   // --- Branch selector (optional) ---
   const branchesBox = root.querySelector<HTMLDivElement>(

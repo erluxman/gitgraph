@@ -58,6 +58,12 @@ export interface RendererHandle {
     readonly link?: number;
     readonly collision?: number;
   }): void;
+  /**
+   * Control how viscous the graph feels when the camera moves.
+   * 0 = very loose (lots of wobble on pan/zoom, slow to settle),
+   * 1 = stiff (barely any wiggle, settles instantly). Default 0.8.
+   */
+  setViscosity(viscosity: number): void;
   /** Tear down everything. */
   destroy(): void;
 }
@@ -196,6 +202,27 @@ export async function mountRenderer(
   let panning = false;
   let panStart: { x: number; y: number; cx: number; cy: number } | null = null;
 
+  // Viscosity: 0 = loose, 1 = stiff. Drives both the simulation's
+  // velocityDecay (so lower viscosity means nodes coast longer) AND
+  // the magnitude of the per-event nudge applied on camera motion.
+  // Default 0.8 → barely-perceptible wobble, settles fast.
+  let viscosity = 0.8;
+  // Tuning constant: how strong the base impulse is. The actual kick
+  // applied to each node is NUDGE_BASE * (1 - viscosity) * event_scale
+  // where event_scale is a small fraction tuned per event type so that
+  // pan (which fires many times per second) doesn't accumulate into
+  // chaos while zoom (a single discrete event) gets a meatier push.
+  const NUDGE_BASE = 8;
+  layout.setVelocityDecay(0.1 + 0.7 * viscosity);
+  const applyViscosity = (v: number): void => {
+    viscosity = Math.max(0, Math.min(1, v));
+    layout.setVelocityDecay(0.1 + 0.7 * viscosity);
+  };
+  const wiggle = (eventScale: number): void => {
+    const m = NUDGE_BASE * (1 - viscosity) * eventScale;
+    if (m > 0) layout.nudge(m);
+  };
+
   setupCamera(app, camera, {
     onScale(next, cx, cy) {
       const before = camera.toLocal({ x: cx, y: cy });
@@ -203,6 +230,9 @@ export async function mountRenderer(
       const after = camera.toLocal({ x: cx, y: cy });
       camera.x += (after.x - before.x) * next;
       camera.y += (after.y - before.y) * next;
+      // Zoom = one discrete event per wheel notch. Give it a noticeable
+      // push so the user sees the graph "splash" when they zoom.
+      wiggle(0.5);
     },
     onPanStart(x, y) {
       panning = true;
@@ -212,6 +242,10 @@ export async function mountRenderer(
       if (!panning || panStart === null) return;
       camera.x = panStart.cx + (x - panStart.x);
       camera.y = panStart.cy + (y - panStart.y);
+      // Pan fires per pointermove (~60Hz). Use a tiny per-event scale
+      // so kicks don't accumulate into chaos while still keeping the
+      // graph in motion as long as the user is dragging.
+      wiggle(0.05);
     },
     onPanEnd() {
       panning = false;
@@ -222,6 +256,11 @@ export async function mountRenderer(
       // deltas. No start/end pairing — each scroll event is atomic.
       camera.x += dx;
       camera.y += dy;
+      // Scale by motion magnitude so a slow scroll wobbles softly
+      // while a fast flick gives a brief shove. Capped so a violent
+      // trackpad gesture doesn't fling nodes off-canvas.
+      const motion = Math.hypot(dx, dy);
+      wiggle(Math.min(0.4, motion * 0.04));
     },
   });
 
@@ -304,6 +343,9 @@ export async function mountRenderer(
       labelLayer.removeChildren();
       nodeViews = [];
       layout = createLayout(next, fullLayoutOpts(opts));
+      // Re-apply the current viscosity to the freshly created layout
+      // so its velocityDecay matches the slider position.
+      applyViscosity(viscosity);
       rebuildSceneIndex();
       buildNodeViews();
     },
@@ -354,6 +396,9 @@ export async function mountRenderer(
     },
     setForceStrengths(strengths) {
       layout.setStrengths(strengths);
+    },
+    setViscosity(v) {
+      applyViscosity(v);
     },
     destroy() {
       layout.stop();
