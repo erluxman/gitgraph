@@ -99,6 +99,18 @@ export async function mountRenderer(
   app.canvas.style.display = "block";
   opts.container.appendChild(app.canvas);
 
+  // Track pointer position over the canvas so drawNodes can pick the
+  // N nodes nearest the cursor for the "auto" label mode.
+  app.canvas.addEventListener("pointermove", (e) => {
+    const rect = app.canvas.getBoundingClientRect();
+    pointerCanvasX = e.clientX - rect.left;
+    pointerCanvasY = e.clientY - rect.top;
+  });
+  app.canvas.addEventListener("pointerleave", () => {
+    pointerCanvasX = -1;
+    pointerCanvasY = -1;
+  });
+
   // Camera: outer container we translate/scale for zoom + pan.
   const camera = new Container();
   app.stage.addChild(camera);
@@ -137,6 +149,13 @@ export async function mountRenderer(
   let nodeScale = 1;
   let labelMode: "always" | "never" | "auto" = "auto";
   let labelZoomThreshold = 0.8;
+  // Pointer position in canvas-local pixel space. Drives the "auto"
+  // label mode — only the N nodes closest to the pointer get labels.
+  // Sentinel value (-1) means "no pointer over canvas", in which case
+  // auto mode shows no labels.
+  let pointerCanvasX = -1;
+  let pointerCanvasY = -1;
+  const MAX_NEARBY_LABELS = 5;
   // Brief highlight after focusNode — counts down each tick.
   let pulseId: string | null = null;
   let pulseFrames = 0;
@@ -310,11 +329,11 @@ export async function mountRenderer(
         text: labelText,
         style: {
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          // Small enough that labels read as a secondary annotation,
-          // not as the dominant visual. The graph topology + node
-          // colour are the primary signal; labels confirm what you're
-          // looking at when you focus on a node.
-          fontSize: 9,
+          // Tiny on purpose — labels are only shown for the 5 nodes
+          // nearest the pointer, so they're a "lean in and read"
+          // annotation rather than always-on text. The graph
+          // topology + node colour carry the primary signal.
+          fontSize: 6,
           fill: style.labelColour,
           align: "center",
         },
@@ -329,7 +348,7 @@ export async function mountRenderer(
       let iconWidth = 0;
       if (badge !== null) {
         iconView = buildBadgeView(badge);
-        iconWidth = 14; // icon (~11px) + 3px trailing gap
+        iconWidth = 10; // icon (~8px) + 2px trailing gap
         labelLayer.addChild(iconView);
       }
 
@@ -397,6 +416,7 @@ export async function mountRenderer(
 
   function drawEdges(): void {
     edgeLayer.clear();
+    const bounds = visibleSceneBounds();
     const highlightSet = hoverId !== null ? highlightNeighbours(hoverId) : null;
     for (const edge of currentScene.edges) {
       const a = sceneNode(edge.source);
@@ -404,6 +424,14 @@ export async function mountRenderer(
       if (a === undefined || b === undefined) continue;
       if (a.x === undefined || a.y === undefined) continue;
       if (b.x === undefined || b.y === undefined) continue;
+
+      // Viewport culling: skip edges where both endpoints lie outside
+      // the visible bounds. An edge with one endpoint in view still
+      // draws — it points into the off-screen direction so the user
+      // sees a hint that there's more graph that way.
+      const aIn = inBounds(a.x, a.y, bounds);
+      const bIn = inBounds(b.x, b.y, bounds);
+      if (!aIn && !bIn) continue;
 
       const baseAlpha = edgeAlpha(edge, highlightSet);
       const colour = highlightSet?.has(a.id) && highlightSet.has(b.id)
@@ -417,17 +445,33 @@ export async function mountRenderer(
   }
 
   function drawNodes(): void {
-    const labelAlpha = computeLabelAlpha();
     const now = performance.now();
     if (pulseFrames > 0) pulseFrames--;
+
+    const bounds = visibleSceneBounds();
+    // For "auto" label mode we show only the N file nodes whose
+    // centres are nearest the pointer. Build that set up-front so we
+    // can flag each view in the loop below.
+    const nearbyLabelIds = computeNearbyLabelIds(bounds);
+
     for (const view of nodeViews) {
       const { node, graphic, label, iconView, iconWidth, bornAt } = view;
       if (node.x === undefined || node.y === undefined) continue;
+
+      // Viewport culling: hide nodes whose centres are outside the
+      // visible scene bounds (plus a small pad in visibleSceneBounds).
+      const inView = inBounds(node.x, node.y, bounds);
+      if (!inView) {
+        graphic.visible = false;
+        label.visible = false;
+        if (iconView !== undefined) iconView.visible = false;
+        continue;
+      }
+      graphic.visible = true;
+
       graphic.position.set(node.x, node.y);
 
       // Center the (badge + label) group horizontally below the node.
-      // The label is anchored at (0.5, 0); the badge sits immediately
-      // to its left.
       const radius = nodeStyle(node).radius;
       const yOffset = radius + 6;
       const totalWidth = label.width + iconWidth;
@@ -454,22 +498,32 @@ export async function mountRenderer(
           : 1;
 
       graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse;
-      // Labels are binary: either rendered at full opacity or not
-      // rendered at all. Setting label.visible explicitly skips the
-      // PIXI Text render pass so we don't get ghost text outlines.
-      const showLabel = labelAlpha > 0 && dim !== FADED_ALPHA;
+
+      // Per-node label visibility:
+      //   "always"  → every visible node shows its label
+      //   "never"   → no labels at all
+      //   "auto"    → only the N nodes nearest the pointer
+      // Filter-dimmed nodes never show their labels either way.
+      const showLabel =
+        labelMode === "never"
+          ? false
+          : dim === FADED_ALPHA
+            ? false
+            : labelMode === "always"
+              ? true
+              : nearbyLabelIds.has(node.id);
       label.visible = showLabel;
-      label.alpha = showLabel ? labelAlpha * fadeIn : 0;
+      label.alpha = showLabel ? 0.85 * fadeIn : 0;
       if (iconView !== undefined) {
         iconView.visible = showLabel;
-        iconView.alpha = showLabel ? labelAlpha * fadeIn : 0;
+        iconView.alpha = showLabel ? 0.85 * fadeIn : 0;
       }
 
       // Brief pulse highlight after focusNode — scale + fade in/out.
       if (pulseId === node.id && pulseFrames > 0) {
         const t = pulseFrames / 60;
-        const scale = 1 + Math.sin((1 - t) * Math.PI) * 0.35;
-        graphic.scale.set(scale);
+        const s = 1 + Math.sin((1 - t) * Math.PI) * 0.35;
+        graphic.scale.set(s);
       } else if (graphic.scale.x !== 1) {
         graphic.scale.set(1);
       }
@@ -477,16 +531,59 @@ export async function mountRenderer(
   }
 
   /**
-   * Auto / always / never label-alpha computation. Auto is BINARY —
-   * either we're past the zoom threshold (full opacity) or we're not
-   * (label hidden entirely). A linear fade looked like permanent ghost
-   * text at low zoom and made the graph hard to read.
+   * Pick up to MAX_NEARBY_LABELS file-node ids closest to the pointer,
+   * in scene coordinates. Skips:
+   *   - child satellites (they're noise; we want file names)
+   *   - filter-dimmed nodes
+   *   - nodes outside the viewport
+   *   - nothing if the pointer isn't over the canvas
    */
-  function computeLabelAlpha(): number {
-    if (labelMode === "never") return 0;
-    if (labelMode === "always") return 0.85;
-    return camera.scale.x >= labelZoomThreshold ? 0.85 : 0;
+  function computeNearbyLabelIds(bounds: SceneBounds): Set<string> {
+    if (labelMode !== "auto") return new Set();
+    if (pointerCanvasX < 0 || pointerCanvasY < 0) return new Set();
+    const scale = camera.scale.x || 1;
+    const px = (pointerCanvasX - camera.x) / scale;
+    const py = (pointerCanvasY - camera.y) / scale;
+    const candidates: { id: string; d2: number }[] = [];
+    for (const view of nodeViews) {
+      const n = view.node;
+      if (n.kind === "child") continue;
+      if (n.x === undefined || n.y === undefined) continue;
+      if (filterMatched !== null && !filterMatched.has(n.id)) continue;
+      if (!inBounds(n.x, n.y, bounds)) continue;
+      const dx = n.x - px;
+      const dy = n.y - py;
+      candidates.push({ id: n.id, d2: dx * dx + dy * dy });
+    }
+    candidates.sort((a, b) => a.d2 - b.d2);
+    return new Set(candidates.slice(0, MAX_NEARBY_LABELS).map((c) => c.id));
   }
+
+  /**
+   * Current viewport in scene coordinates — the inverse of the camera
+   * transform applied to the canvas rectangle. Includes a small pad so
+   * nodes don't pop in and out right at the edge during pan.
+   */
+  function visibleSceneBounds(): SceneBounds {
+    const w = app.renderer.width / (globalThis.devicePixelRatio ?? 1);
+    const h = app.renderer.height / (globalThis.devicePixelRatio ?? 1);
+    const scale = camera.scale.x || 1;
+    const pad = 60;
+    const x0 = -camera.x / scale - pad;
+    const y0 = -camera.y / scale - pad;
+    const x1 = x0 + w / scale + 2 * pad;
+    const y1 = y0 + h / scale + 2 * pad;
+    return { x0, y0, x1, y1 };
+  }
+
+  // (computeLabelAlpha removed — label visibility is now per-node
+  // based on pointer proximity. See computeNearbyLabelIds + drawNodes.)
+  //
+  // We still accept labelZoomThreshold from the controls panel but
+  // silently ignore it now; the panel's "Show at zoom ≥" slider has
+  // become inert in auto mode. Leaving the setter on RendererHandle
+  // for API compatibility; callers that don't tune it see no change.
+  void labelZoomThreshold;
 
   /** Wrap nodeStyle with the global radius multiplier from setNodeScale. */
   function scaledStyle(
@@ -690,6 +787,18 @@ export async function mountRenderer(
   }
 }
 
+/** Scene-coordinate viewport bounds, used for culling. */
+interface SceneBounds {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+function inBounds(x: number, y: number, b: SceneBounds): boolean {
+  return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+}
+
 interface FileBadge {
   readonly color: number;
   /** Compact code language tag — useful when we fall back to text. */
@@ -735,7 +844,7 @@ function fileTypeBadge(path: string): FileBadge | null {
 const FILE_ICON_PATH =
   "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z";
 
-const BADGE_PX = 11; // rendered icon height, paired with 9px label
+const BADGE_PX = 8; // rendered icon height, paired with 6px label
 
 /**
  * Render a small file glyph tinted by language. We attempt to use
