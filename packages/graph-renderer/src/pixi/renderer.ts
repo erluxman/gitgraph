@@ -408,7 +408,12 @@ export async function mountRenderer(
           : 1;
 
       graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse;
-      label.alpha = (dim ?? labelAlpha) * fadeIn;
+      // Labels are binary: either rendered at full opacity or not
+      // rendered at all. Setting label.visible explicitly skips the
+      // PIXI Text render pass so we don't get ghost text outlines.
+      const showLabel = labelAlpha > 0 && dim !== FADED_ALPHA;
+      label.visible = showLabel;
+      label.alpha = showLabel ? labelAlpha * fadeIn : 0;
 
       // Brief pulse highlight after focusNode — scale + fade in/out.
       if (pulseId === node.id && pulseFrames > 0) {
@@ -421,15 +426,16 @@ export async function mountRenderer(
     }
   }
 
-  /** Auto / always / never label-alpha computation. */
+  /**
+   * Auto / always / never label-alpha computation. Auto is BINARY —
+   * either we're past the zoom threshold (full opacity) or we're not
+   * (label hidden entirely). A linear fade looked like permanent ghost
+   * text at low zoom and made the graph hard to read.
+   */
   function computeLabelAlpha(): number {
     if (labelMode === "never") return 0;
     if (labelMode === "always") return 0.85;
-    // auto: fade in proportional to zoom past the threshold.
-    const z = camera.scale.x;
-    if (z >= labelZoomThreshold) return 0.85;
-    // Fade smoothly from 0 at z=0 to 0.85 at z=threshold.
-    return Math.max(0, (z / labelZoomThreshold) * 0.85);
+    return camera.scale.x >= labelZoomThreshold ? 0.85 : 0;
   }
 
   /** Wrap nodeStyle with the global radius multiplier from setNodeScale. */
@@ -715,30 +721,46 @@ function setupCamera(
 
   // --- Left-click drag on the empty background → pan ---
   //
-  // Listen at the stage level so events fire only when no node was hit
-  // (PIXI dispatches to the deepest target first; node graphics consume
-  // it before it bubbles here).
+  // Implemented with canvas-level DOM events plus a PIXI hit-test so
+  // we never touch the stage's event flow. If the left-click landed on
+  // a node, the renderer's node-pointerdown handler runs as normal and
+  // we bail out of background-pan; otherwise we pan the camera.
   let bgDown = false;
-  let bgStart = { x: 0, y: 0 };
-  app.stage.on("pointerdown", (ev) => {
-    if (ev.target !== app.stage) return; // a node consumed it
-    if (ev.button !== 0) return;
+  app.canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (hitNode(app, e.clientX, e.clientY)) return; // node will handle it
     bgDown = true;
-    bgStart = { x: ev.global.x, y: ev.global.y };
-    cb.onPanStart(ev.global.x, ev.global.y);
+    cb.onPanStart(e.clientX, e.clientY);
   });
-  app.stage.on("globalpointermove", (ev) => {
+  app.canvas.addEventListener("pointermove", (e) => {
     if (!bgDown) return;
-    cb.onPanMove(ev.global.x, ev.global.y);
+    cb.onPanMove(e.clientX, e.clientY);
   });
-  const endBgPan = () => {
+  const endBgPan = (): void => {
     if (!bgDown) return;
     bgDown = false;
     cb.onPanEnd();
   };
-  app.stage.on("pointerup", endBgPan);
-  app.stage.on("pointerupoutside", endBgPan);
-  // Suppress the unused `bgStart` lint — we read .x/.y in onPanStart so
-  // the recorded values exist for the caller to use if desired.
-  void bgStart;
+  app.canvas.addEventListener("pointerup", (e) => {
+    if (e.button === 0) endBgPan();
+  });
+  app.canvas.addEventListener("pointerleave", endBgPan);
+}
+
+/**
+ * Use PIXI's federated-event hit-test to find out whether a screen-
+ * coordinate point lands on an interactive node graphic. Used by the
+ * background-pan handler to skip starting a pan when the user is
+ * actually clicking a node.
+ */
+function hitNode(app: Application, clientX: number, clientY: number): boolean {
+  const rect = app.canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const boundary = (app.renderer.events as { rootBoundary?: unknown })
+    .rootBoundary as { hitTest?: (x: number, y: number) => unknown } | undefined;
+  if (boundary?.hitTest === undefined) return false;
+  const target = boundary.hitTest(x, y);
+  // Stage itself is the "no node" return; anything else is a node graphic.
+  return target !== null && target !== undefined && target !== app.stage;
 }

@@ -79,7 +79,7 @@ export function mountControlsPanel(
       <strong style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#cbd5e1;">Graph controls</strong>
       <span class="gg-controls__toggle" style="font-size:14px;line-height:1;color:#94a3b8;">−</span>
     </div>
-    <div class="gg-controls__body" style="padding:10px 12px;width:240px;">
+    <div class="gg-controls__body" style="padding:10px 12px;width:240px;max-height:calc(100vh - 80px);overflow-y:auto;overflow-x:hidden;">
       <!-- Compare branches (populated by setBranchSelector) -->
       <div class="gg-controls__branches" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1f2937;"></div>
 
