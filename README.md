@@ -20,13 +20,13 @@ Two one-liners. Both scripts handle Bun install, deps, build, and packaging
 for you, then print what to do next.
 
 ```sh
-./chrome_extension.sh    # Chrome extension → builds and copies to ~/.local/share/gitgraph-chrome
+./chrome_extension.sh    # Chrome extension → builds into packages/chrome/dist/
 ./vscode_extension.sh    # VS Code extension → packs and installs via `code --install-extension`
 ```
 
 After running them:
 
-- **Chrome**: open `chrome://extensions/` → Developer mode → Load unpacked → pick the path the script prints
+- **Chrome**: open `chrome://extensions/` → Developer mode → Load unpacked → pick `packages/chrome/dist/`. Chrome reads it from there each time it loads — keep the repo where it is, or re-add from the new location if you move it.
 - **VS Code**: the extension is already installed; click the gitGraph icon (three circles) in the activity bar
 
 The sections below describe what each script does and how to do it by hand.

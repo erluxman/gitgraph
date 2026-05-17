@@ -4,14 +4,12 @@
 # What this does:
 #   1. installs Bun if missing
 #   2. installs JS deps
-#   3. builds the Chrome extension bundles
-#   4. copies the output to a stable home outside the repo
-#   5. prints click-by-click instructions for loading it in Chrome
+#   3. builds the Chrome extension bundles into packages/chrome/dist/
+#   4. prints click-by-click instructions for loading that folder in Chrome
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 DIST="$REPO/packages/chrome/dist"
-HOME_DIR="${GITGRAPH_CHROME_HOME:-$HOME/.local/share/gitgraph-chrome}"
 
 cyan()  { printf "\033[36m%s\033[0m\n" "$*"; }
 green() { printf "\033[32m%s\033[0m\n" "$*"; }
@@ -37,13 +35,7 @@ BUN_INSTALL_CACHE_DIR="$REPO/.bun-cache" bun install >/dev/null
 
 cyan "==> Building Chrome extension"
 bun run --cwd packages/chrome build >/dev/null
-
-cyan "==> Copying to stable install location"
-mkdir -p "$HOME_DIR"
-# Wipe contents but keep the dir (avoid changing inode if Chrome already loaded it).
-rm -rf "$HOME_DIR"/*
-cp -R "$DIST"/. "$HOME_DIR"/
-green "    Installed to $HOME_DIR"
+green "    Built into $DIST"
 
 cat <<EOF
 
@@ -52,12 +44,17 @@ $(bold "Next steps — load it into Chrome (one time only):")
   1. Open  $(bold "chrome://extensions/")
   2. Toggle  $(bold "Developer mode")  in the top-right corner
   3. Click  $(bold "Load unpacked")
-  4. Pick  $(bold "$HOME_DIR")
+  4. Pick  $(bold "$DIST")
   5. (Optional) Pin the extension via the puzzle-piece icon
 
 $(bold "To upgrade later:")
-  rerun this script. Then click the circular reload icon on the
-  gitGraph card in chrome://extensions/.
+  rerun this script (it rebuilds in place). Then click the circular
+  reload icon on the gitGraph card in chrome://extensions/.
+
+$(bold "Note:")
+  Chrome reads the extension from the path above each time it loads.
+  If you move or delete this repo, the extension will break — keep
+  the repo where it is or re-add it from a new location.
 
 $(bold "First use:")
   - Click the gitGraph icon → Settings → paste a GitHub Personal
