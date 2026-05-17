@@ -91,7 +91,7 @@ export function mountControlsPanel(
       <label style="display:block;color:#9ca3af;margin-bottom:6px;">Show only</label>
       <div class="gg-controls__impact-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;">
         ${impactChipHtml("red", "Changed", "#ef4444", true)}
-        ${impactChipHtml("orange", "Downstream", "#aa7316", true)}
+        ${impactChipHtml("orange", "Downstream", "#eab308", true)}
         ${impactChipHtml("green", "Unaffected", "#4ade80", true)}
         ${impactChipHtml("core", "Core", "#facc15", false)}
       </div>

@@ -9,8 +9,15 @@ import type { SceneNode } from "./types.js";
 export const COLOURS = {
   green: 0x4ade80,
   red: 0xef4444,
-  orange: 0xf97316,
+  // Yellow (Tailwind yellow-500) instead of pure orange: a notch
+  // darker than the core accent (#facc15 = yellow-400) so the two
+  // yellows don't collide, and clearly distinguishable from the red
+  // so a changed file doesn't blur into its downstream cone.
+  orange: 0xeab308,
   core: 0xfacc15, // glow accent for core paths
+  // White ring used on red (changed) files so they pop visually over
+  // the amber/green crowd even on a busy graph.
+  redBorder: 0xffffff,
 } as const;
 
 /** Node radius in pixels. */
@@ -59,22 +66,37 @@ export function nodeStyle(
     };
   }
 
-  // Changed (red) files are the most important thing on screen — make
-  // them prominent even when they have zero exports (e.g. test files,
-  // config-like JS). Orange is bumped a little so consumers don't get
-  // lost when the changed file is huge. Plain green files keep the
-  // default radius scale.
+  // Changed (red) files are the most important thing on screen — give
+  // them a doubled minimum radius AND a 3 px white ring so they read
+  // as "the thing you came here to look at" no matter the surrounding
+  // density. Orange is bumped a little so consumers don't get lost
+  // when the changed file is huge. Plain green files keep the default
+  // radius scale.
   const baseRadius = scaleRadius(node.exportCount, o);
   const minForImpact =
-    node.impact === "red" ? 16 : node.impact === "orange" ? 9 : o.minRadius;
+    node.impact === "red" ? 32 : node.impact === "orange" ? 9 : o.minRadius;
   const radius = Math.max(baseRadius, minForImpact);
+
+  // Border priority: red gets the white ring even if it's also a core
+  // path — the change-status signal takes precedence over the core tag
+  // for files that are actually changing. Non-red core paths keep the
+  // existing yellow glow.
+  let borderColour: number | null = null;
+  let borderWidth = 0;
+  if (node.impact === "red") {
+    borderColour = COLOURS.redBorder;
+    borderWidth = 3;
+  } else if (node.core) {
+    borderColour = COLOURS.core;
+    borderWidth = 2;
+  }
 
   return {
     radius,
     fill: baseColourFor(node),
     alpha: 1,
-    borderColour: node.core ? COLOURS.core : null,
-    borderWidth: node.core ? 2 : 0,
+    borderColour,
+    borderWidth,
     labelColour: 0xe5e7eb,
   };
 }

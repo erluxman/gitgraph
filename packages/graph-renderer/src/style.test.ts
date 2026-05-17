@@ -47,19 +47,27 @@ describe("nodeStyle", () => {
     expect(big.radius).toBeGreaterThan(small.radius);
   });
 
-  it("forces a minimum radius for changed (red) nodes regardless of exports", () => {
+  it("forces a doubled minimum radius for changed (red) nodes regardless of exports", () => {
     const zeroExports = nodeStyle(
       node({ impact: "red", exportCount: 0 }),
       { maxExports: 100 },
     );
-    expect(zeroExports.radius).toBeGreaterThanOrEqual(16);
+    expect(zeroExports.radius).toBeGreaterThanOrEqual(32);
   });
 
-  it("adds a glow border for core paths", () => {
+  it("gives red files a 3px white ring; non-red core files keep the yellow glow", () => {
     const plain = nodeStyle(node({ core: false }));
     const core = nodeStyle(node({ core: true }));
+    const redPlain = nodeStyle(node({ impact: "red", core: false }));
+    const redCore = nodeStyle(node({ impact: "red", core: true }));
     expect(plain.borderColour).toBeNull();
     expect(core.borderColour).toBe(COLOURS.core);
-    expect(core.borderWidth).toBeGreaterThan(0);
+    expect(core.borderWidth).toBe(2);
+    expect(redPlain.borderColour).toBe(COLOURS.redBorder);
+    expect(redPlain.borderWidth).toBe(3);
+    // Red wins over core: changed files keep the white ring even when
+    // they're a core path.
+    expect(redCore.borderColour).toBe(COLOURS.redBorder);
+    expect(redCore.borderWidth).toBe(3);
   });
 });
