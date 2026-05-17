@@ -166,6 +166,24 @@ export async function mountRenderer(
   let pulseId: string | null = null;
   let pulseFrames = 0;
 
+  // Indexed view of the current scene — fast O(1) id → node + adjacency
+  // lookups used by the blame-chain hover. Rebuilt on every setScene.
+  let nodeById = new Map<string, SceneNode>();
+  let outgoingIds = new Map<string, Set<string>>();
+  let incomingIds = new Map<string, Set<string>>();
+  // When the user hovers a red/orange node, blame state captures the
+  // full chain in BOTH directions so the user can see WHY the hovered
+  // file is affected AND WHAT the file's change would affect downstream.
+  //   blameEdgesDown — edges along the path toward red ("what this file
+  //                    depends on", solid lines).
+  //   blameEdgesUp   — edges along the path toward consumers ("what
+  //                    depends on this file", dotted lines).
+  //   blameNodes     — every node in either chain.
+  // All three are null when the hovered node is green / there's no hover.
+  let blameNodes: Set<string> | null = null;
+  let blameEdgesDown: Set<string> | null = null;
+  let blameEdgesUp: Set<string> | null = null;
+
   // Camera controls.
   let panning = false;
   let panStart: { x: number; y: number; cx: number; cy: number } | null = null;
@@ -199,6 +217,7 @@ export async function mountRenderer(
     },
   });
 
+  rebuildSceneIndex();
   buildNodeViews();
 
   app.ticker.add(() => {
@@ -266,6 +285,7 @@ export async function mountRenderer(
       labelLayer.removeChildren();
       nodeViews = [];
       layout = createLayout(next, fullLayoutOpts(opts));
+      rebuildSceneIndex();
       buildNodeViews();
     },
     setFilter(matched) {
@@ -339,11 +359,13 @@ export async function mountRenderer(
       g.on("pointerdown", (ev) => handlePointerDown(node, ev));
       g.on("pointerover", () => {
         hoverId = node.id;
+        recomputeBlame();
         opts.onNodeHover?.(node);
       });
       g.on("pointerout", () => {
         if (hoverId === node.id) {
           hoverId = null;
+          recomputeBlame();
           opts.onNodeHover?.(null);
         }
       });
@@ -464,18 +486,70 @@ export async function mountRenderer(
       const bIn = inBounds(b.x, b.y, bounds);
       if (!aIn && !bIn) continue;
 
-      // Highlight ONLY edges directly touching the hovered node.
-      // Neighbours-of-neighbours stay un-highlighted. Other edges fade
-      // to a faint background so the hovered node's direct connections
-      // stand out.
-      const isDirect = hoverId !== null && (a.id === hoverId || b.id === hoverId);
+      // Edge highlighting picks the most informative mode:
+      //   1. Hovering a red/orange node → blame chain. Edges along the
+      //      DOWN walk (this file depends on X, X depends on Y, … red)
+      //      draw SOLID; edges along the UP walk (Z depends on this
+      //      file, W depends on Z, …) draw DOTTED. Two styles answer two
+      //      different questions: "why am I yellow" vs "who do I drag".
+      //   2. Hovering anything else → direct edges only, single solid
+      //      style. Neighbour-of-neighbour edges stay un-highlighted.
       const someoneHovered = hoverId !== null;
-      const baseAlpha = someoneHovered ? (isDirect ? 0.95 : 0.08) : EDGE_ALPHA;
-      const colour = isDirect ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
-      edgeLayer
-        .moveTo(a.x, a.y)
-        .lineTo(b.x, b.y)
-        .stroke({ color: colour, alpha: baseAlpha, width: Math.max(0.5, edge.weight * 0.8) });
+      const blameActive = blameEdgesDown !== null;
+      const key = edgeKey(a.id, b.id);
+      const isDown = blameActive && blameEdgesDown!.has(key);
+      const isUp = blameActive && blameEdgesUp!.has(key);
+      const isBlame = isDown || isUp;
+      const isDirect =
+        !blameActive && someoneHovered && (a.id === hoverId || b.id === hoverId);
+      const baseAlpha = blameActive
+        ? (isBlame ? 0.95 : 0.04)
+        : someoneHovered
+          ? (isDirect ? 0.95 : 0.08)
+          : EDGE_ALPHA;
+      const colour = isBlame || isDirect ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
+      const width = Math.max(0.5, edge.weight * 0.8);
+      if (isUp) {
+        // Dotted: lay down a sequence of dash segments and stroke them
+        // all with the same style. Dash/gap chosen so dashes read as
+        // dotted at default zoom but stay readable when zoomed out.
+        drawDashedSegment(edgeLayer, a.x, a.y, b.x, b.y, 4, 3);
+        edgeLayer.stroke({ color: colour, alpha: baseAlpha, width });
+      } else {
+        edgeLayer
+          .moveTo(a.x, a.y)
+          .lineTo(b.x, b.y)
+          .stroke({ color: colour, alpha: baseAlpha, width });
+      }
+    }
+  }
+
+  /**
+   * Lay down a sequence of (dash, gap) segments from (x1,y1) to (x2,y2)
+   * onto the given Graphics. Caller is responsible for the subsequent
+   * stroke() — that's how all dashes pick up the same style at once.
+   */
+  function drawDashedSegment(
+    g: Graphics,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    dash: number,
+    gap: number,
+  ): void {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-3) return;
+    const step = dash + gap;
+    const ux = dx / len;
+    const uy = dy / len;
+    let pos = 0;
+    while (pos < len) {
+      const end = Math.min(pos + dash, len);
+      g.moveTo(x1 + ux * pos, y1 + uy * pos).lineTo(x1 + ux * end, y1 + uy * end);
+      pos += step;
     }
   }
 
@@ -532,15 +606,24 @@ export async function mountRenderer(
           ? 0.85 + 0.15 * (0.5 + 0.5 * Math.sin(now / 380))
           : 1;
 
-      graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse;
+      // When the blame chain is active, nodes that aren't part of the
+      // chain dim hard so the chain itself pops. The chain nodes keep
+      // their normal colour at full opacity.
+      const blameActive = blameNodes !== null;
+      const isHovered = node.id === hoverId;
+      const inBlame = blameActive && blameNodes!.has(node.id);
+      const offBlame = blameActive && !inBlame;
+      const blameDim = offBlame ? 0.18 : 1;
+
+      graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse * blameDim;
 
       // Per-node label visibility:
       //   "always"  → every visible node shows its label
       //   "never"   → no labels at all
       //   "auto"    → only the N nodes nearest the pointer
       // Filter-dimmed nodes never show their labels either way.
-      // The hovered node ALWAYS shows its label regardless of mode —
-      // when the user's pointer is on a node, they want to know which.
+      // Hovered node + every node in the blame chain always show their
+      // labels so the user can read the chain end-to-end.
       const showLabel =
         labelMode === "never"
           ? false
@@ -548,13 +631,17 @@ export async function mountRenderer(
             ? false
             : labelMode === "always"
               ? true
-              : nearbyLabelIds.has(node.id) || node.id === hoverId;
+              : nearbyLabelIds.has(node.id) || node.id === hoverId || inBlame;
 
-      // Hover spotlight: the hovered node's label grows ~30% and
-      // stays fully opaque; every other visible label fades to 50%
-      // so the eye is pulled to the one under the cursor.
-      const isHovered = node.id === hoverId;
-      const hoverDim = hoverId !== null && !isHovered ? 0.5 : 1;
+      // Hover spotlight: the hovered node's label grows ~30% and stays
+      // fully opaque. When a blame chain is active, off-chain labels
+      // disappear entirely; otherwise non-hovered visible labels fade
+      // to 50%.
+      const hoverDim = offBlame
+        ? 0
+        : hoverId !== null && !isHovered
+          ? 0.5
+          : 1;
       const labelScale = isHovered ? 1.3 : 1;
 
       label.visible = showLabel;
@@ -609,33 +696,48 @@ export async function mountRenderer(
   }
 
   /**
-   * Pan + scale the camera so every file node's centre fits inside
-   * the visible canvas with a margin. Honours `maxZoom` so a tiny
-   * 3-file graph doesn't blow up to absurd magnification.
+   * Pan + scale the camera so the main cluster fits the visible canvas
+   * with a margin. On dense graphs a handful of orphan nodes drift far
+   * out and would otherwise stretch the bbox asymmetrically, leaving
+   * the visible cluster wedged in a corner — we trim the outermost ~2%
+   * on each axis so the bbox tracks the cluster, not the stragglers.
+   * `maxZoom` caps how aggressively we scale up a small graph.
    */
-  function runFitView(opts?: { padding?: number; maxZoom?: number }): void {
-    const padding = opts?.padding ?? 60;
-    const maxZoom = opts?.maxZoom ?? 1.2;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let visible = 0;
+  function runFitView(fitOpts?: { padding?: number; maxZoom?: number }): void {
+    const padding = fitOpts?.padding ?? 40;
+    const maxZoom = fitOpts?.maxZoom ?? 4;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    let maxR = 0;
     for (const view of nodeViews) {
       const n = view.node;
       if (n.kind === "child") continue;
       if (n.x === undefined || n.y === undefined) continue;
       if (filterMatched !== null && !filterMatched.has(n.id)) continue;
+      xs.push(n.x);
+      ys.push(n.y);
       const r = nodeStyle(n).radius;
-      minX = Math.min(minX, n.x - r);
-      minY = Math.min(minY, n.y - r);
-      maxX = Math.max(maxX, n.x + r);
-      maxY = Math.max(maxY, n.y + r);
-      visible++;
+      if (r > maxR) maxR = r;
     }
-    if (visible === 0) return;
-    const w = app.renderer.width / (globalThis.devicePixelRatio ?? 1);
-    const h = app.renderer.height / (globalThis.devicePixelRatio ?? 1);
+    if (xs.length === 0) return;
+    xs.sort((a, b) => a - b);
+    ys.sort((a, b) => a - b);
+    // Percentile trim — drops far outliers on big graphs while leaving
+    // small graphs untouched (where every node matters).
+    const trim = xs.length >= 50 ? 0.02 : 0;
+    const lo = Math.floor(xs.length * trim);
+    const hi = Math.min(xs.length - 1, Math.ceil(xs.length * (1 - trim)) - 1);
+    const minX = xs[lo]! - maxR;
+    const maxX = xs[hi]! + maxR;
+    const minY = ys[lo]! - maxR;
+    const maxY = ys[hi]! + maxR;
+    // Prefer the live canvas size — `app.renderer.width` can lag the
+    // container if a resize event hasn't fired yet (common right after
+    // mount, or when the user just dragged the editor sash).
+    const rect = opts.container.getBoundingClientRect();
+    const dpr = globalThis.devicePixelRatio ?? 1;
+    const w = rect.width > 1 ? rect.width : app.renderer.width / dpr;
+    const h = rect.height > 1 ? rect.height : app.renderer.height / dpr;
     const graphW = Math.max(1, maxX - minX) + 2 * padding;
     const graphH = Math.max(1, maxY - minY) + 2 * padding;
     const zoom = Math.min(maxZoom, w / graphW, h / graphH);
@@ -702,9 +804,131 @@ export async function mountRenderer(
 
   function sceneNode(ref: string | SceneNode): SceneNode | undefined {
     if (typeof ref === "string") {
-      return currentScene.nodes.find((n) => n.id === ref);
+      return nodeById.get(ref) ?? currentScene.nodes.find((n) => n.id === ref);
     }
     return ref;
+  }
+
+  /**
+   * Build an id → node map plus outgoing/incoming adjacency from the
+   * current scene. Called once at mount and again whenever setScene
+   * swaps the scene out. The maps power the blame-chain hover.
+   */
+  function rebuildSceneIndex(): void {
+    nodeById = new Map(currentScene.nodes.map((n) => [n.id, n]));
+    outgoingIds = new Map();
+    incomingIds = new Map();
+    for (const e of currentScene.edges) {
+      const sId = typeof e.source === "string" ? e.source : e.source.id;
+      const tId = typeof e.target === "string" ? e.target : e.target.id;
+      let out = outgoingIds.get(sId);
+      if (out === undefined) {
+        out = new Set();
+        outgoingIds.set(sId, out);
+      }
+      out.add(tId);
+      let inc = incomingIds.get(tId);
+      if (inc === undefined) {
+        inc = new Set();
+        incomingIds.set(tId, inc);
+      }
+      inc.add(sId);
+    }
+  }
+
+  function edgeKey(from: string, to: string): string {
+    return `${from}${to}`;
+  }
+
+  /**
+   * Compute the blame chain for the currently hovered node, walking
+   * BOTH directions so direction is visible in the highlight:
+   *
+   *   DOWN (toward red, drawn SOLID) — walk outgoing edges, only
+   *   descending to neighbours whose distance is current − 1. Tells the
+   *   user "this file depends on X, which depends on Y, …, which is
+   *   the red change". Empty for red nodes (already at distance 0).
+   *
+   *   UP (toward consumers, drawn DOTTED) — walk incoming edges, only
+   *   ascending to neighbours whose distance is current + 1. Tells the
+   *   user "Z depends on this file, W depends on Z, …" — the propagation
+   *   cone.
+   *
+   * Green / no hover clears blame state; drawEdges falls back to its
+   * direct-edge highlight for green hover.
+   */
+  function recomputeBlame(): void {
+    blameNodes = null;
+    blameEdgesDown = null;
+    blameEdgesUp = null;
+    if (hoverId === null) return;
+    const node = nodeById.get(hoverId);
+    if (node === undefined) return;
+    if (node.impact === "green") return;
+    if (!Number.isFinite(node.distance)) return;
+
+    const nodes = new Set<string>([node.id]);
+    const down = new Set<string>();
+    const up = new Set<string>();
+
+    // DOWN walk — only meaningful when there's somewhere lower to go
+    // (distance > 0). For a red node this loop body never runs.
+    if (node.distance > 0) {
+      const seen = new Set<string>([node.id]);
+      const queue: string[] = [node.id];
+      while (queue.length > 0) {
+        const curId = queue.shift()!;
+        const cur = nodeById.get(curId);
+        if (cur === undefined) continue;
+        const outs = outgoingIds.get(curId);
+        if (outs === undefined) continue;
+        for (const tId of outs) {
+          const tNode = nodeById.get(tId);
+          if (tNode === undefined) continue;
+          if (tNode.distance !== cur.distance - 1) continue;
+          // Edges are stored (importer → imported); curId is the
+          // importer, tId is the imported.
+          down.add(edgeKey(curId, tId));
+          if (!seen.has(tId)) {
+            seen.add(tId);
+            nodes.add(tId);
+            queue.push(tId);
+          }
+        }
+      }
+    }
+
+    // UP walk — files that consume this one, transitively. Always runs
+    // for red/orange nodes; for green there is no UP walk because we
+    // return early above.
+    {
+      const seen = new Set<string>([node.id]);
+      const queue: string[] = [node.id];
+      while (queue.length > 0) {
+        const curId = queue.shift()!;
+        const cur = nodeById.get(curId);
+        if (cur === undefined) continue;
+        const ins = incomingIds.get(curId);
+        if (ins === undefined) continue;
+        for (const sId of ins) {
+          const sNode = nodeById.get(sId);
+          if (sNode === undefined) continue;
+          if (!Number.isFinite(sNode.distance)) continue;
+          if (sNode.distance !== cur.distance + 1) continue;
+          // Importer sId depends on imported curId.
+          up.add(edgeKey(sId, curId));
+          if (!seen.has(sId)) {
+            seen.add(sId);
+            nodes.add(sId);
+            queue.push(sId);
+          }
+        }
+      }
+    }
+
+    blameNodes = nodes;
+    blameEdgesDown = down;
+    blameEdgesUp = up;
   }
 
   // (highlightNeighbours / edgeAlpha removed — hover edge highlighting

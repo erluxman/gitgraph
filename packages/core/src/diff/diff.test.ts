@@ -105,6 +105,129 @@ describe("analyseDiff", () => {
   });
 });
 
+describe("blame-chain invariant", () => {
+  // The orange classification is meaningless unless we can point at the
+  // chain that propagated the change. The invariant we lean on here:
+  //
+  //   For every node with finite distance D ≥ 1, at least one of its
+  //   *imports* (outgoing-edge targets) has distance exactly D − 1.
+  //
+  // Each step of the chain is provable from the previous one, so by
+  // induction every orange node has a step-by-step path to a red node.
+  // No edge path is reconstructed in the test itself — we only inspect
+  // the distance values the diff assigned.
+  function checkGradient(
+    graph: ReturnType<typeof buildGraph>,
+    result: ReturnType<typeof analyseDiff>,
+  ): void {
+    for (const [path, impact] of result.impacts) {
+      if (impact.kind !== "orange") continue;
+      const outs = graph.outgoing.get(path);
+      if (outs === undefined || outs.size === 0) {
+        throw new Error(
+          `orange node ${path} (distance ${impact.distance}) has no outgoing imports — cannot be on a blame chain`,
+        );
+      }
+      const downhill = [...outs].some((nbr) => {
+        const ni = result.impacts.get(nbr);
+        return ni !== undefined && ni.distance === impact.distance - 1;
+      });
+      if (!downhill) {
+        const debug = [...outs]
+          .map((n) => `${n}=${result.impacts.get(n)?.distance ?? "?"}`)
+          .join(", ");
+        throw new Error(
+          `orange node ${path} (distance ${impact.distance}) has no import whose distance is ${impact.distance - 1}. imports: ${debug}`,
+        );
+      }
+    }
+  }
+
+  it("holds on a straight import chain", () => {
+    const graph = buildGraph({
+      repo: repo({
+        "a.ts": ``,
+        "b.ts": `import "./a";`,
+        "c.ts": `import "./b";`,
+        "d.ts": `import "./c";`,
+      }),
+    });
+    const result = analyseDiff({ graph, changedFiles: ["a.ts"] });
+    expect(() => checkGradient(graph, result)).not.toThrow();
+  });
+
+  it("holds on a diamond (two paths converging on one source)", () => {
+    const graph = buildGraph({
+      repo: repo({
+        "core.ts": ``,
+        "left.ts": `import "./core";`,
+        "right.ts": `import "./core";`,
+        "top.ts": `import "./left"; import "./right";`,
+      }),
+    });
+    const result = analyseDiff({ graph, changedFiles: ["core.ts"] });
+    expect(() => checkGradient(graph, result)).not.toThrow();
+  });
+
+  it("holds when multiple files change at once", () => {
+    const graph = buildGraph({
+      repo: repo({
+        "a.ts": ``,
+        "b.ts": ``,
+        "x.ts": `import "./a";`,
+        "y.ts": `import "./b";`,
+        "z.ts": `import "./x"; import "./y";`,
+      }),
+    });
+    const result = analyseDiff({ graph, changedFiles: ["a.ts", "b.ts"] });
+    expect(() => checkGradient(graph, result)).not.toThrow();
+  });
+
+  it("holds when the import graph contains a cycle", () => {
+    // a ↔ b cycle; c imports a; b is unchanged. Cycles must not break
+    // the gradient — BFS visits each node once so a's distance is 0,
+    // b's distance is 1 (imports a), and c's is also 1 (imports a).
+    const graph = buildGraph({
+      repo: repo({
+        "a.ts": `import "./b";`,
+        "b.ts": `import "./a";`,
+        "c.ts": `import "./a";`,
+      }),
+    });
+    const result = analyseDiff({ graph, changedFiles: ["a.ts"] });
+    expect(() => checkGradient(graph, result)).not.toThrow();
+  });
+
+  it("flags a synthetic data violation (orange node with no downhill import)", () => {
+    // Defensive: if someone ever hand-crafts an impact map that
+    // claims a node is orange without a corresponding import path,
+    // the gradient check should catch it. Construct it manually rather
+    // than relying on analyseDiff (which is the producer being verified
+    // by the other tests in this block).
+    const graph = buildGraph({
+      repo: repo({
+        "a.ts": ``,
+        "b.ts": `import "./a";`,
+        "isolated.ts": ``,
+      }),
+    });
+    const result = {
+      impacts: new Map([
+        ["a.ts", { path: "a.ts", kind: "red" as const, distance: 0, opacity: 1 }],
+        ["b.ts", { path: "b.ts", kind: "orange" as const, distance: 1, opacity: 1 }],
+        // BOGUS: claims orange but has no imports at all
+        [
+          "isolated.ts",
+          { path: "isolated.ts", kind: "orange" as const, distance: 1, opacity: 1 },
+        ],
+      ]),
+      changedKnown: ["a.ts"],
+      changedUnknown: [],
+    };
+    expect(() => checkGradient(graph, result)).toThrow(/no outgoing imports/);
+  });
+});
+
 describe("orangeOpacity", () => {
   it("matches SPEC fade table", () => {
     expect(orangeOpacity(1)).toBe(1.0);
