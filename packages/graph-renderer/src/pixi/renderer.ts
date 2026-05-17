@@ -310,7 +310,11 @@ export async function mountRenderer(
         text: labelText,
         style: {
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 11,
+          // Small enough that labels read as a secondary annotation,
+          // not as the dominant visual. The graph topology + node
+          // colour are the primary signal; labels confirm what you're
+          // looking at when you focus on a node.
+          fontSize: 9,
           fill: style.labelColour,
           align: "center",
         },
@@ -325,7 +329,7 @@ export async function mountRenderer(
       let iconWidth = 0;
       if (badge !== null) {
         iconView = buildBadgeView(badge);
-        iconWidth = 18; // icon width (~14px) + 4px trailing gap
+        iconWidth = 14; // icon (~11px) + 3px trailing gap
         labelLayer.addChild(iconView);
       }
 
@@ -731,7 +735,7 @@ function fileTypeBadge(path: string): FileBadge | null {
 const FILE_ICON_PATH =
   "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z";
 
-const BADGE_PX = 14; // rendered icon height
+const BADGE_PX = 11; // rendered icon height, paired with 9px label
 
 /**
  * Render a small file glyph tinted by language. We attempt to use
@@ -765,7 +769,7 @@ function buildBadgeView(badge: FileBadge): Container {
       text: badge.tag,
       style: {
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 9,
+        fontSize: 8,
         fontWeight: "700",
         fill: badge.color,
         align: "center",
