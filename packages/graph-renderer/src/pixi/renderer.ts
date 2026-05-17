@@ -116,6 +116,10 @@ export async function mountRenderer(
     readonly node: SceneNode;
     readonly graphic: Graphics;
     readonly label: Text;
+    /** Small colored language badge (TS / JS / D) drawn next to the label. */
+    readonly iconView?: Container;
+    /** Width of the badge in pixels — used to position the label after it. */
+    readonly iconWidth: number;
     /** performance.now() when this view was first rendered — drives the fade-in. */
     readonly bornAt: number;
   };
@@ -212,6 +216,7 @@ export async function mountRenderer(
       for (const view of nodeViews) {
         view.graphic.destroy();
         view.label.destroy();
+        view.iconView?.destroy({ children: true });
       }
       nodeLayer.removeChildren();
       labelLayer.removeChildren();
@@ -293,8 +298,16 @@ export async function mountRenderer(
       });
       nodeLayer.addChild(g);
 
+      // File-type badge + label-without-extension. File nodes get a
+      // small colored badge (TS / JS / D) next to the label; child
+      // nodes (symbols) inherit the parent's badge concept-wise and
+      // skip the icon entirely to stay subordinate.
+      const badge = node.kind === "child" ? null : fileTypeBadge(node.path);
+      const labelText =
+        node.kind === "child" ? node.displayName : stripExtension(node.displayName);
+
       const label = new Text({
-        text: node.displayName,
+        text: labelText,
         style: {
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
           fontSize: 11,
@@ -302,10 +315,28 @@ export async function mountRenderer(
           align: "center",
         },
       });
-      label.anchor.set(0.5, -0.4 - style.radius / 12);
+      // We anchor at (0.5, 0) so we can position the label and the
+      // optional badge as a horizontal group whose centre sits below
+      // the node.
+      label.anchor.set(0.5, 0);
       labelLayer.addChild(label);
 
-      nodeViews.push({ node, graphic: g, label, bornAt: performance.now() });
+      let iconView: Container | undefined;
+      let iconWidth = 0;
+      if (badge !== null) {
+        iconView = buildBadgeView(badge);
+        iconWidth = 20; // badge width incl. trailing gap
+        labelLayer.addChild(iconView);
+      }
+
+      nodeViews.push({
+        node,
+        graphic: g,
+        label,
+        ...(iconView !== undefined ? { iconView } : {}),
+        iconWidth,
+        bornAt: performance.now(),
+      });
     }
   }
 
@@ -386,10 +417,21 @@ export async function mountRenderer(
     const now = performance.now();
     if (pulseFrames > 0) pulseFrames--;
     for (const view of nodeViews) {
-      const { node, graphic, label, bornAt } = view;
+      const { node, graphic, label, iconView, iconWidth, bornAt } = view;
       if (node.x === undefined || node.y === undefined) continue;
       graphic.position.set(node.x, node.y);
-      label.position.set(node.x, node.y);
+
+      // Center the (badge + label) group horizontally below the node.
+      // The label is anchored at (0.5, 0); the badge sits immediately
+      // to its left.
+      const radius = nodeStyle(node).radius;
+      const yOffset = radius + 6;
+      const totalWidth = label.width + iconWidth;
+      const groupLeft = node.x - totalWidth / 2;
+      if (iconView !== undefined) {
+        iconView.position.set(groupLeft, node.y + yOffset);
+      }
+      label.position.set(groupLeft + iconWidth + label.width / 2, node.y + yOffset);
 
       const dim =
         filterMatched !== null && !filterMatched.has(node.id) ? FADED_ALPHA : null;
@@ -414,6 +456,10 @@ export async function mountRenderer(
       const showLabel = labelAlpha > 0 && dim !== FADED_ALPHA;
       label.visible = showLabel;
       label.alpha = showLabel ? labelAlpha * fadeIn : 0;
+      if (iconView !== undefined) {
+        iconView.visible = showLabel;
+        iconView.alpha = showLabel ? labelAlpha * fadeIn : 0;
+      }
 
       // Brief pulse highlight after focusNode — scale + fade in/out.
       if (pulseId === node.id && pulseFrames > 0) {
@@ -461,7 +507,8 @@ export async function mountRenderer(
     for (const view of nodeViews) {
       const style = scaledStyle(view.node, maxExports);
       drawNode(view.graphic, style, view.node);
-      view.label.anchor.set(0.5, -0.4 - style.radius / 12);
+      // Label/icon positioning is computed each frame from radius, so
+      // we just redraw the node shape here.
     }
   }
 
@@ -622,6 +669,7 @@ export async function mountRenderer(
     for (const view of nodeViews) {
       view.graphic.destroy();
       view.label.destroy();
+      view.iconView?.destroy({ children: true });
     }
     nodeLayer.removeChildren();
     labelLayer.removeChildren();
@@ -636,6 +684,80 @@ export async function mountRenderer(
     linkForce?.links?.(edges as SceneEdge[]);
     layout.reheat(0.5);
   }
+}
+
+interface FileBadge {
+  readonly letter: string;
+  readonly color: number;
+}
+
+/**
+ * Pick a small colored language badge for a given file path. Returns
+ * null for files we don't render a badge for (currently anything that
+ * isn't TS/TSX/JS/JSX/MJS/CJS/Dart).
+ */
+function fileTypeBadge(path: string): FileBadge | null {
+  const lower = path.toLowerCase();
+  if (
+    lower.endsWith(".ts") ||
+    lower.endsWith(".tsx") ||
+    lower.endsWith(".mts") ||
+    lower.endsWith(".cts")
+  ) {
+    return { letter: "TS", color: 0x3178c6 };
+  }
+  if (
+    lower.endsWith(".js") ||
+    lower.endsWith(".jsx") ||
+    lower.endsWith(".mjs") ||
+    lower.endsWith(".cjs")
+  ) {
+    return { letter: "JS", color: 0xc7a008 };
+  }
+  if (lower.endsWith(".dart")) {
+    return { letter: "D", color: 0x40c4ff };
+  }
+  return null;
+}
+
+/**
+ * Build a small rounded-rect badge with a centered letter inside.
+ * Used as the file-type indicator next to each file node's label.
+ * The Container's local origin is at the top-left so callers can
+ * position it without thinking about anchors.
+ */
+function buildBadgeView(badge: FileBadge): Container {
+  const c = new Container();
+  const bg = new Graphics();
+  bg.roundRect(0, 0, 16, 12, 2).fill({ color: badge.color });
+  c.addChild(bg);
+  const t = new Text({
+    text: badge.letter,
+    style: {
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontSize: 8,
+      fontWeight: "700",
+      fill: 0xffffff,
+      align: "center",
+    },
+  });
+  t.anchor.set(0.5, 0.5);
+  t.position.set(8, 6);
+  c.addChild(t);
+  return c;
+}
+
+/**
+ * Drop the trailing extension from a filename so the label reads
+ * "profile" instead of "profile.ts" — the colored badge already
+ * communicates the language.
+ */
+function stripExtension(displayName: string): string {
+  const dot = displayName.lastIndexOf(".");
+  // Keep names with no extension as-is, and don't strip when the dot
+  // is at position 0 (a dotfile like ".gitkeep").
+  if (dot <= 0) return displayName;
+  return displayName.slice(0, dot);
 }
 
 interface CameraCallbacks {

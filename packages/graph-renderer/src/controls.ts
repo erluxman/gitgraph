@@ -83,6 +83,16 @@ export function mountControlsPanel(
       <!-- Compare branches (populated by setBranchSelector) -->
       <div class="gg-controls__branches" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1f2937;"></div>
 
+      <!-- Show only (clickable impact filter) -->
+      <label style="display:block;color:#9ca3af;margin-bottom:6px;">Show only</label>
+      <div class="gg-controls__impact-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;">
+        ${impactChipHtml("red", "Changed", "#ef4444", true)}
+        ${impactChipHtml("orange", "Downstream", "#f97316", true)}
+        ${impactChipHtml("green", "Unaffected", "#4ade80", true)}
+        ${impactChipHtml("core", "Core", "#facc15", false)}
+      </div>
+      <hr style="border:0;border-top:1px solid #1f2937;margin:0 0 12px 0;" />
+
       <!-- Search -->
       <label style="display:block;color:#9ca3af;margin-bottom:4px;">Search files <span style="color:#6b7280;font-size:10px;margin-left:4px;">⌘K to open palette</span></label>
       <div class="gg-controls__chips" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;"></div>
@@ -137,6 +147,54 @@ export function mountControlsPanel(
     .addEventListener("click", () => {
       setCollapsed(body.style.display !== "none");
     });
+
+  // --- Impact filter chips (clickable) ---
+  const activeImpacts = new Set<string>(["red", "orange", "green"]);
+  let coreOnly = false;
+  const chipButtons = root.querySelectorAll<HTMLButtonElement>(".gg-controls__chip");
+
+  function recomputeImpactFilter(): void {
+    // No filter when the user has all three impact kinds selected AND
+    // hasn't enabled core-only.
+    const allKindsActive =
+      activeImpacts.has("red") &&
+      activeImpacts.has("orange") &&
+      activeImpacts.has("green");
+    if (allKindsActive && !coreOnly) {
+      handle.setFilter(null);
+      return;
+    }
+    const matched = new Set<string>();
+    for (const node of scene.nodes) {
+      if (node.kind === "child") continue;
+      if (!activeImpacts.has(node.impact)) continue;
+      if (coreOnly && !node.core) continue;
+      matched.add(node.id);
+    }
+    handle.setFilter(matched);
+  }
+
+  function paintChip(btn: HTMLButtonElement, active: boolean): void {
+    btn.dataset.active = active ? "1" : "";
+    btn.style.background = active ? "#1e293b" : "#0f172a";
+    btn.style.borderColor = active ? "#334155" : "#1f2937";
+    btn.style.color = active ? "#e5e7eb" : "#6b7280";
+  }
+
+  for (const btn of chipButtons) {
+    btn.addEventListener("click", () => {
+      const kind = btn.dataset.kind!;
+      if (kind === "core") {
+        coreOnly = !coreOnly;
+        paintChip(btn, coreOnly);
+      } else {
+        if (activeImpacts.has(kind)) activeImpacts.delete(kind);
+        else activeImpacts.add(kind);
+        paintChip(btn, activeImpacts.has(kind));
+      }
+      recomputeImpactFilter();
+    });
+  }
 
   // --- Search + focused-file chip ---
   const searchInput = root.querySelector<HTMLInputElement>(".gg-controls__search")!;
@@ -368,6 +426,7 @@ export function mountControlsPanel(
     updateScene(next) {
       scene = next;
       renderResults();
+      recomputeImpactFilter();
     },
     setBranchSelector(next) {
       branchOpts = next;
@@ -383,6 +442,31 @@ export function mountControlsPanel(
 function basenameOf(path: string): string {
   const idx = path.lastIndexOf("/");
   return idx === -1 ? path : path.slice(idx + 1);
+}
+
+/**
+ * Render markup for a single clickable impact chip. `kind` is "red" /
+ * "orange" / "green" for impact kinds, or "core" for the core-tag
+ * filter. `initiallyActive` controls the starting state — impact kinds
+ * default to active (no filter); core defaults to inactive.
+ */
+function impactChipHtml(
+  kind: string,
+  label: string,
+  colour: string,
+  initiallyActive: boolean,
+): string {
+  const isSquare = kind === "core";
+  const dot = isSquare
+    ? `<span style="display:inline-block;width:8px;height:8px;background:${colour};margin-right:4px;vertical-align:middle;"></span>`
+    : `<span style="display:inline-block;width:8px;height:8px;background:${colour};border-radius:50%;margin-right:4px;vertical-align:middle;"></span>`;
+  const active = initiallyActive ? " data-active=\"1\"" : "";
+  return `
+    <button type="button" class="gg-controls__chip" data-kind="${kind}"${active}
+      style="display:inline-flex;align-items:center;gap:2px;padding:3px 8px;border-radius:12px;font-size:11px;cursor:pointer;font-family:inherit;background:${initiallyActive ? "#1e293b" : "#0f172a"};border:1px solid ${initiallyActive ? "#334155" : "#1f2937"};color:${initiallyActive ? "#e5e7eb" : "#6b7280"};">
+      ${dot}${label}
+    </button>
+  `;
 }
 
 function isTypingInInput(target: EventTarget | null): boolean {
