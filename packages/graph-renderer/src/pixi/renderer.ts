@@ -325,7 +325,7 @@ export async function mountRenderer(
       let iconWidth = 0;
       if (badge !== null) {
         iconView = buildBadgeView(badge);
-        iconWidth = 20; // badge width incl. trailing gap
+        iconWidth = 18; // icon width (~14px) + 4px trailing gap
         labelLayer.addChild(iconView);
       }
 
@@ -687,14 +687,19 @@ export async function mountRenderer(
 }
 
 interface FileBadge {
-  readonly letter: string;
   readonly color: number;
+  /** Compact code language tag — useful when we fall back to text. */
+  readonly tag: string;
 }
 
 /**
- * Pick a small colored language badge for a given file path. Returns
- * null for files we don't render a badge for (currently anything that
- * isn't TS/TSX/JS/JSX/MJS/CJS/Dart).
+ * Pick a colored language tint for a given file path. Returns null for
+ * files we don't render an icon for (anything outside the languages
+ * the parser supports).
+ *
+ * The actual visual is a Material-style "file" glyph filled with this
+ * colour — no background pill — so the icon reads as "a file in this
+ * language" rather than a chunky pill.
  */
 function fileTypeBadge(path: string): FileBadge | null {
   const lower = path.toLowerCase();
@@ -704,7 +709,7 @@ function fileTypeBadge(path: string): FileBadge | null {
     lower.endsWith(".mts") ||
     lower.endsWith(".cts")
   ) {
-    return { letter: "TS", color: 0x3178c6 };
+    return { color: 0x3178c6, tag: "TS" };
   }
   if (
     lower.endsWith(".js") ||
@@ -712,38 +717,65 @@ function fileTypeBadge(path: string): FileBadge | null {
     lower.endsWith(".mjs") ||
     lower.endsWith(".cjs")
   ) {
-    return { letter: "JS", color: 0xc7a008 };
+    return { color: 0xeac90b, tag: "JS" };
   }
   if (lower.endsWith(".dart")) {
-    return { letter: "D", color: 0x40c4ff };
+    return { color: 0x40c4ff, tag: "D" };
   }
   return null;
 }
 
+// Material Symbols "Description" icon (file with corner fold) — 24×24
+// viewBox. Solid path so we can render it via PIXI's Graphics.svg().
+// Source: material-symbols/symbols/web/description (Apache 2.0).
+const FILE_ICON_PATH =
+  "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z";
+
+const BADGE_PX = 14; // rendered icon height
+
 /**
- * Build a small rounded-rect badge with a centered letter inside.
- * Used as the file-type indicator next to each file node's label.
- * The Container's local origin is at the top-left so callers can
- * position it without thinking about anchors.
+ * Render a small file glyph tinted by language. We attempt to use
+ * PIXI's `Graphics.svg()` (v8+) so the icon stays crisp at any zoom.
+ * If that API isn't present at runtime (or the SVG path fails), we
+ * fall back to a small text tag like "TS" — still better than nothing.
+ *
+ * The Container's local origin is at the top-left so the caller can
+ * position it without anchor math.
  */
 function buildBadgeView(badge: FileBadge): Container {
   const c = new Container();
-  const bg = new Graphics();
-  bg.roundRect(0, 0, 16, 12, 2).fill({ color: badge.color });
-  c.addChild(bg);
-  const t = new Text({
-    text: badge.letter,
-    style: {
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 8,
-      fontWeight: "700",
-      fill: 0xffffff,
-      align: "center",
-    },
-  });
-  t.anchor.set(0.5, 0.5);
-  t.position.set(8, 6);
-  c.addChild(t);
+  const g = new Graphics();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${FILE_ICON_PATH}" fill="#${badge.color.toString(16).padStart(6, "0")}"/></svg>`;
+  const svgFn = (g as unknown as { svg?: (s: string) => Graphics }).svg;
+  let drewSvg = false;
+  if (typeof svgFn === "function") {
+    try {
+      svgFn.call(g, svg);
+      // After Graphics.svg(), the artwork is in the source's 0..24
+      // coordinate space. Scale it down to ~14px tall.
+      g.scale.set(BADGE_PX / 24);
+      drewSvg = true;
+    } catch {
+      drewSvg = false;
+    }
+  }
+  if (!drewSvg) {
+    // Fallback: tiny letter tag, same color, no pill background.
+    const t = new Text({
+      text: badge.tag,
+      style: {
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 9,
+        fontWeight: "700",
+        fill: badge.color,
+        align: "center",
+      },
+    });
+    t.anchor.set(0, 0);
+    c.addChild(t);
+    return c;
+  }
+  c.addChild(g);
   return c;
 }
 
