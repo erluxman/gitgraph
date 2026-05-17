@@ -8,14 +8,24 @@
     />
     <title>gitGraph</title>
     <style>
-      html, body {
+      html,
+      body {
         margin: 0;
         height: 100%;
         background: #0f172a;
         color: #e5e7eb;
-        font-family: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
+        font-family: var(
+          --vscode-font-family,
+          ui-sans-serif,
+          system-ui,
+          sans-serif
+        );
       }
-      #root { display: flex; flex-direction: column; height: 100vh; }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
       header {
         display: flex;
         align-items: center;
@@ -60,9 +70,17 @@
       <header>
         <strong>gitGraph</strong>
         <div class="legend">
-          <span><span class="dot" style="background:#ef4444"></span>changed</span>
-          <span><span class="dot" style="background:#f97316"></span>downstream</span>
-          <span><span class="dot" style="background:#4ade80"></span>unaffected</span>
+          <span
+            ><span class="dot" style="background: #ef4444"></span>changed</span
+          >
+          <span
+            ><span class="dot" style="background: #aa7316"></span
+            >downstream</span
+          >
+          <span
+            ><span class="dot" style="background: #4ade80"></span
+            >unaffected</span
+          >
         </div>
         <span id="status">Initializing…</span>
       </header>

@@ -1,7 +1,6 @@
 # gitGraph — Visual Diff Analysis with Dependency-Aware Risk Scoring
 
-**Version:** 0.1.0
-**Public name:** gitGraphing (internal codename: gitGraph)
+**Version:** 0.1.0 **Public name:** gitGraphing (internal codename: gitGraph)
 
 ## Problem
 
@@ -10,11 +9,12 @@ Traditional diffs show what changed — not what **will break**. A 3-line change
 ## Solution
 
 gitGraph builds a **dependency graph** of your codebase, then overlays PR/commit diffs onto it. You see instantly:
+
 - **Red nodes** — files that changed
 - **Orange nodes** — files that import changed files (transitively) and may break
 - **Green nodes** — files unaffected by this change
 
-Risk scoring via PageRank centrality tells you *how* dangerous each change is. Core architecture files glow hotter than leaf components.
+Risk scoring via PageRank centrality tells you _how_ dangerous each change is. Core architecture files glow hotter than leaf components.
 
 ## Target Audience
 
@@ -25,9 +25,11 @@ Code reviewers — especially teams dealing with AI-generated PRs where changes 
 ## Platforms
 
 ### Chrome Extension (MVP — build first)
+
 Injects a button on GitHub PR pages. Click → full-screen overlay/modal with interactive dependency graph showing the PR's blast radius. Works on public repos without auth, private repos with token.
 
 ### VS Code Extension (Phase 2)
+
 Sidebar panel (like Explorer) + option to pop into full editor tab. Auto-detects current branch's PR via GitHub CLI. Also supports branch-to-branch comparison.
 
 ---
@@ -37,7 +39,7 @@ Sidebar panel (like Explorer) + option to pop into full editor tab. Auto-detects
 ### Supported Languages
 
 | Language | Parser | Node Detection | Import Tracking |
-|----------|--------|---------------|-----------------|
+| --- | --- | --- | --- |
 | TypeScript | TS compiler API (`ts.createSourceFile`) | `export` keyword only | static `import` + `import()` with string literal |
 | JavaScript | TS compiler API (`allowJs: true`) | `export` / `module.exports` | static `import` + `require()` string literals + `import()` |
 | Dart | Custom AST parser (regex-based for browser) | public symbols (no `_` prefix) | `import`/`export`/`part`/`part of` |
@@ -65,6 +67,7 @@ Sidebar panel (like Explorer) + option to pop into full editor tab. Auto-detects
 ### Monorepo Support
 
 Cross-package edges supported. Detects monorepo structure via:
+
 - `pnpm-workspace.yaml`
 - `package.json` workspaces field
 - `lerna.json`
@@ -79,7 +82,7 @@ User-configurable via `.gitgraph.json` in repo root.
 ### Caching
 
 | Platform | Cache Location | Lifetime |
-|----------|---------------|----------|
+| --- | --- | --- |
 | Chrome extension | Session storage | Cleared on tab close |
 | VS Code extension | Workspace storage | Persisted, invalidated on new commits |
 
@@ -92,6 +95,7 @@ User-configurable via `.gitgraph.json` in repo root.
 **Physics:** D3-force simulation
 
 Forces applied:
+
 - **Charge** — repulsion between all nodes (prevents overlap)
 - **Link** — attraction along import edges (connected files stay close)
 - **Folder gravity** — files in same folder attract each other (Obsidian-style clustering)
@@ -106,12 +110,12 @@ All files visible from start. No folder-level clustering. User zooms/pans for la
 
 ### Node Shapes
 
-| Entity | Shape | Size | Label |
-|--------|-------|------|-------|
-| File | Circle | Proportional to export count | Filename only |
-| Function | Small circle | Fixed small | Function name |
-| Class | Rounded rectangle | Proportional to method count | Class name |
-| Variable | Diamond | Fixed small | Variable name |
+| Entity   | Shape             | Size                         | Label         |
+| -------- | ----------------- | ---------------------------- | ------------- |
+| File     | Circle            | Proportional to export count | Filename only |
+| Function | Small circle      | Fixed small                  | Function name |
+| Class    | Rounded rectangle | Proportional to method count | Class name    |
+| Variable | Diamond           | Fixed small                  | Variable name |
 
 ### Node Expansion
 
@@ -124,7 +128,7 @@ All import edges visible at all times. Curved bezier lines. Thickness proportion
 ### Interactions
 
 | Action | Result |
-|--------|--------|
+| --- | --- |
 | Click | Expand/collapse file to show children |
 | Ctrl/Cmd + Click | Jump to definition (VS Code: open file, Chrome: GitHub file view) |
 | Right-click | Context menu: details, mark as core path, copy path |
@@ -136,6 +140,7 @@ All import edges visible at all times. Curved bezier lines. Thickness proportion
 ### Search & Filter
 
 Search bar pinned to top of graph view:
+
 - Search by filename
 - Search by function/class name
 - Filter: "show only files importing X"
@@ -155,14 +160,14 @@ Manually tagged critical files get glowing border + star badge. Tagged via right
 ### Color Coding
 
 | Color | Hex | Meaning |
-|-------|-----|---------|
+| --- | --- | --- |
 | Green | `#4ade80` | Unchanged — not affected by this change |
 | Red | `#ef4444` | Directly affected — file appears in the diff |
-| Orange | `#f97316` | Indirectly affected — imports a changed file (transitively) |
+| Orange | `#aa7316` | Indirectly affected — imports a changed file (transitively) |
 
 ### Impact Direction
 
-**Downstream consumers only.** If `auth.ts` is changed, everything that imports `auth.ts`, and everything that imports *those* files, etc. is marked orange.
+**Downstream consumers only.** If `auth.ts` is changed, everything that imports `auth.ts`, and everything that imports _those_ files, etc. is marked orange.
 
 Rationale: Answers "what might break because of this change."
 
@@ -171,6 +176,7 @@ Algorithm: BFS from each changed file, following reverse import edges (file → 
 ### Orange Fade Effect
 
 Orange opacity fades based on BFS distance from nearest changed file:
+
 - Distance 1: 100% opacity
 - Distance 2: 80%
 - Distance 3: 60%
@@ -182,11 +188,13 @@ Deeper = less likely to actually break, so visually quieter.
 ### Diff Data Sources
 
 **Chrome extension:**
+
 1. GitHub REST API: `GET /repos/{owner}/{repo}/pulls/{pr}/files`
 2. Fallback: GitHub GraphQL API
 3. Last resort: DOM scraping of PR files tab
 
 **VS Code extension:**
+
 1. `git diff` via child_process
 2. PR detection via `gh pr view --json` (GitHub CLI)
 3. Manual: paste PR URL command
@@ -226,6 +234,7 @@ Button injected next to "Files changed" tab on GitHub PR pages. Label: "gitGraph
 ### Overlay
 
 Full-screen modal with backdrop blur. Contains:
+
 - Graph canvas (100% of modal)
 - Top toolbar: search bar, legend (green/red/orange), settings gear, close button
 - Close via X button or Escape key
@@ -233,12 +242,14 @@ Full-screen modal with backdrop blur. Contains:
 ### Data Fetching Strategy
 
 **Light scan (default):**
+
 1. Fetch PR changed files list via GitHub API
 2. Fetch repo file tree via `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`
 3. Fetch file contents ONLY for changed files + their direct importers (on-demand)
 4. Parse imports, build partial graph, expand transitively as needed
 
 **Deep scan (toggle in settings):**
+
 1. Fetch ALL file contents and parse everything
 2. Full graph with full risk scoring
 3. Slower but complete picture
@@ -247,11 +258,11 @@ Toggle in extension settings. Default: light scan.
 
 ### Authentication
 
-| Repo Type | Auth Required | Rate Limit |
-|-----------|---------------|------------|
-| Public | No | 60 req/hr |
-| Public + token | Optional | 5000 req/hr |
-| Private | Yes (PAT) | 5000 req/hr |
+| Repo Type      | Auth Required | Rate Limit  |
+| -------------- | ------------- | ----------- |
+| Public         | No            | 60 req/hr   |
+| Public + token | Optional      | 5000 req/hr |
+| Private        | Yes (PAT)     | 5000 req/hr |
 
 Token stored in `chrome.storage.local`.
 
@@ -302,6 +313,7 @@ VS Code 1.80+
 ### Features
 
 Everything Chrome has, plus:
+
 - Core path tagging via right-click context menu
 - Jump to definition opens file in editor
 - Persistent workspace storage
@@ -363,7 +375,7 @@ gitgraph/
 Pure TypeScript, zero runtime dependencies (except TS compiler API for parsing). Modules:
 
 | Module | Responsibility |
-|--------|---------------|
+| --- | --- |
 | `parser` | AST parse JS/TS/Dart files → extract nodes (files, functions, classes, variables) and edges (imports) |
 | `graph` | Build adjacency list from parsed data. Expose graph query API |
 | `diff` | Take list of changed file paths → classify all nodes as red/orange/green |
@@ -382,11 +394,7 @@ PIXI.js + D3-force. Receives graph data as JSON → renders interactive canvas. 
 
 ```json
 {
-  "excludePaths": [
-    "scripts/**",
-    "docs/**",
-    "*.test.ts"
-  ],
+  "excludePaths": ["scripts/**", "docs/**", "*.test.ts"],
   "corePaths": [
     "src/core/auth.ts",
     "src/core/database.ts",
@@ -407,6 +415,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 ### Unit Tests (vitest)
 
 **Parser tests:**
+
 - TS file with exports → correct nodes extracted
 - TS file with no exports → no nodes
 - JS file with `module.exports` → correct nodes
@@ -419,6 +428,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 - Circular imports → handled without infinite loop
 
 **Graph builder tests:**
+
 - Simple A→B import → correct adjacency
 - Transitive A→B→C → full closure computed
 - Monorepo cross-package import → edge created
@@ -426,6 +436,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 - Missing file import → graceful handling (dangling edge)
 
 **Diff analyzer tests:**
+
 - Single file changed → correct red/green/orange
 - Core file changed → many orange nodes
 - Leaf file changed → only that file red, rest green
@@ -433,6 +444,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 - File deleted → red, consumers marked orange
 
 **Risk scorer tests:**
+
 - Hub file (many importers) → high score
 - Leaf file (no importers) → low score
 - Core-tagged file → 1.5x boost applied
@@ -448,6 +460,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 ### E2E Tests
 
 **Chrome extension (Playwright):**
+
 - Button appears on GitHub PR page
 - Click button → overlay opens with graph
 - Graph renders correct number of nodes for test repo
@@ -458,6 +471,7 @@ Placed in repo root. Committed to version control so whole team shares config.
 - Settings popup saves/loads token
 
 **VS Code extension (VS Code Extension Test Runner):**
+
 - Sidebar panel renders graph
 - Reindex command completes without error
 - Jump to definition opens correct file at correct line

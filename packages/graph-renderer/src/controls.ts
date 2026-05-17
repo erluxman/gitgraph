@@ -91,7 +91,7 @@ export function mountControlsPanel(
       <label style="display:block;color:#9ca3af;margin-bottom:6px;">Show only</label>
       <div class="gg-controls__impact-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;">
         ${impactChipHtml("red", "Changed", "#ef4444", true)}
-        ${impactChipHtml("orange", "Downstream", "#f97316", true)}
+        ${impactChipHtml("orange", "Downstream", "#aa7316", true)}
         ${impactChipHtml("green", "Unaffected", "#4ade80", true)}
         ${impactChipHtml("core", "Core", "#facc15", false)}
       </div>
@@ -147,13 +147,15 @@ export function mountControlsPanel(
     body.style.display = collapsed ? "none" : "";
     toggle.textContent = collapsed ? "+" : "−";
   };
-  root.querySelector<HTMLDivElement>(".gg-controls__header")!
+  root
+    .querySelector<HTMLDivElement>(".gg-controls__header")!
     .addEventListener("click", (e) => {
       // Don't toggle the panel when the user clicked the FIT chip.
       if ((e.target as HTMLElement).closest(".gg-controls__fit")) return;
       setCollapsed(body.style.display !== "none");
     });
-  root.querySelector<HTMLButtonElement>(".gg-controls__fit")!
+  root
+    .querySelector<HTMLButtonElement>(".gg-controls__fit")!
     .addEventListener("click", (e) => {
       e.stopPropagation();
       handle.fitView();
@@ -162,7 +164,8 @@ export function mountControlsPanel(
   // --- Impact filter chips (clickable) ---
   const activeImpacts = new Set<string>(["red", "orange", "green"]);
   let coreOnly = false;
-  const chipButtons = root.querySelectorAll<HTMLButtonElement>(".gg-controls__chip");
+  const chipButtons =
+    root.querySelectorAll<HTMLButtonElement>(".gg-controls__chip");
 
   function recomputeImpactFilter(): void {
     // No filter when the user has all three impact kinds selected AND
@@ -208,8 +211,12 @@ export function mountControlsPanel(
   }
 
   // --- Search + focused-file chip ---
-  const searchInput = root.querySelector<HTMLInputElement>(".gg-controls__search")!;
-  const resultsBox = root.querySelector<HTMLDivElement>(".gg-controls__results")!;
+  const searchInput = root.querySelector<HTMLInputElement>(
+    ".gg-controls__search",
+  )!;
+  const resultsBox = root.querySelector<HTMLDivElement>(
+    ".gg-controls__results",
+  )!;
   const chipsBox = root.querySelector<HTMLDivElement>(".gg-controls__chips")!;
   let focusedPath: string | null = null;
 
@@ -314,12 +321,21 @@ export function mountControlsPanel(
   searchInput.addEventListener("input", renderResults);
 
   // --- Label mode ---
-  const labelModeSel = root.querySelector<HTMLSelectElement>(".gg-controls__label-mode")!;
-  const labelThresholdRow = root.querySelector<HTMLDivElement>(".gg-controls__label-threshold-row")!;
-  const labelThreshold = root.querySelector<HTMLInputElement>(".gg-controls__label-threshold")!;
-  const labelThresholdVal = root.querySelector<HTMLSpanElement>(".gg-controls__label-threshold-val")!;
+  const labelModeSel = root.querySelector<HTMLSelectElement>(
+    ".gg-controls__label-mode",
+  )!;
+  const labelThresholdRow = root.querySelector<HTMLDivElement>(
+    ".gg-controls__label-threshold-row",
+  )!;
+  const labelThreshold = root.querySelector<HTMLInputElement>(
+    ".gg-controls__label-threshold",
+  )!;
+  const labelThresholdVal = root.querySelector<HTMLSpanElement>(
+    ".gg-controls__label-threshold-val",
+  )!;
   const syncThresholdVisibility = (): void => {
-    labelThresholdRow.style.display = labelModeSel.value === "auto" ? "" : "none";
+    labelThresholdRow.style.display =
+      labelModeSel.value === "auto" ? "" : "none";
   };
   labelModeSel.addEventListener("change", () => {
     handle.setLabelMode(labelModeSel.value as "auto" | "always" | "never");
@@ -333,8 +349,12 @@ export function mountControlsPanel(
   syncThresholdVisibility();
 
   // --- Node scale ---
-  const nodeScale = root.querySelector<HTMLInputElement>(".gg-controls__node-scale")!;
-  const nodeScaleVal = root.querySelector<HTMLSpanElement>(".gg-controls__node-scale-val")!;
+  const nodeScale = root.querySelector<HTMLInputElement>(
+    ".gg-controls__node-scale",
+  )!;
+  const nodeScaleVal = root.querySelector<HTMLSpanElement>(
+    ".gg-controls__node-scale-val",
+  )!;
   nodeScale.addEventListener("input", () => {
     const v = Number(nodeScale.value);
     nodeScaleVal.textContent = `${v.toFixed(1)}×`;
@@ -344,10 +364,14 @@ export function mountControlsPanel(
   // --- Forces ---
   wireForce(root, "charge", (v) => handle.setForceStrengths({ charge: v }));
   wireForce(root, "link", (v) => handle.setForceStrengths({ link: v }));
-  wireForce(root, "collision", (v) => handle.setForceStrengths({ collision: v }));
+  wireForce(root, "collision", (v) =>
+    handle.setForceStrengths({ collision: v }),
+  );
 
   // --- Branch selector (optional) ---
-  const branchesBox = root.querySelector<HTMLDivElement>(".gg-controls__branches")!;
+  const branchesBox = root.querySelector<HTMLDivElement>(
+    ".gg-controls__branches",
+  )!;
   let branchOpts: BranchSelectorOptions | null = null;
 
   function renderBranchSelector(): void {
@@ -378,17 +402,24 @@ export function mountControlsPanel(
       </div>
     `;
 
-    const baseSel = branchesBox.querySelector<HTMLSelectElement>(".gg-controls__base")!;
-    const headSel = branchesBox.querySelector<HTMLSelectElement>(".gg-controls__head")!;
-    const button = branchesBox.querySelector<HTMLButtonElement>(".gg-controls__apply")!;
-    const status = branchesBox.querySelector<HTMLSpanElement>(".gg-controls__apply-status")!;
+    const baseSel =
+      branchesBox.querySelector<HTMLSelectElement>(".gg-controls__base")!;
+    const headSel =
+      branchesBox.querySelector<HTMLSelectElement>(".gg-controls__head")!;
+    const button = branchesBox.querySelector<HTMLButtonElement>(
+      ".gg-controls__apply",
+    )!;
+    const status = branchesBox.querySelector<HTMLSpanElement>(
+      ".gg-controls__apply-status",
+    )!;
     button.addEventListener("click", async () => {
       if (branchOpts === null) return;
       const base = baseSel.value;
       const head = headSel.value;
       button.disabled = true;
       status.style.color = "#9ca3af";
-      status.textContent = head === "" || head === base ? "Loading…" : `${base} → ${head}…`;
+      status.textContent =
+        head === "" || head === base ? "Loading…" : `${base} → ${head}…`;
       try {
         await branchOpts.onApply(base, head);
         status.textContent = "";
@@ -413,7 +444,10 @@ export function mountControlsPanel(
   }
 
   function escapeAttr(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
   }
 
   if (opts.branchSelector !== undefined) {
@@ -424,8 +458,7 @@ export function mountControlsPanel(
   // --- Cmd+L (or `[`) toggles panel visibility from anywhere ---
   const togglePanelKey = (e: KeyboardEvent): void => {
     if (isTypingInInput(e.target)) return;
-    const isMetaL =
-      (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l";
+    const isMetaL = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l";
     const isBracket = e.key === "[" && !e.metaKey && !e.ctrlKey;
     if (!isMetaL && !isBracket) return;
     e.preventDefault();
@@ -471,7 +504,7 @@ function impactChipHtml(
   const dot = isSquare
     ? `<span style="display:inline-block;width:8px;height:8px;background:${colour};margin-right:4px;vertical-align:middle;"></span>`
     : `<span style="display:inline-block;width:8px;height:8px;background:${colour};border-radius:50%;margin-right:4px;vertical-align:middle;"></span>`;
-  const active = initiallyActive ? " data-active=\"1\"" : "";
+  const active = initiallyActive ? ' data-active="1"' : "";
   return `
     <button type="button" class="gg-controls__chip" data-kind="${kind}"${active}
       style="display:inline-flex;align-items:center;gap:2px;padding:3px 8px;border-radius:12px;font-size:11px;cursor:pointer;font-family:inherit;background:${initiallyActive ? "#1e293b" : "#0f172a"};border:1px solid ${initiallyActive ? "#334155" : "#1f2937"};color:${initiallyActive ? "#e5e7eb" : "#6b7280"};">
@@ -492,9 +525,12 @@ function basePositionStyle(
   position: "top-right" | "top-left" | "bottom-right" | "bottom-left",
 ): Partial<CSSStyleDeclaration> {
   const off = "16px";
-  if (position === "top-right") return { position: "absolute", top: off, right: off };
-  if (position === "top-left") return { position: "absolute", top: off, left: off };
-  if (position === "bottom-right") return { position: "absolute", bottom: off, right: off };
+  if (position === "top-right")
+    return { position: "absolute", top: off, right: off };
+  if (position === "top-left")
+    return { position: "absolute", top: off, left: off };
+  if (position === "bottom-right")
+    return { position: "absolute", bottom: off, right: off };
   return { position: "absolute", bottom: off, left: off };
 }
 
@@ -519,8 +555,12 @@ function wireForce(
   key: string,
   apply: (v: number) => void,
 ): void {
-  const input = root.querySelector<HTMLInputElement>(`.gg-controls__force-${key}`)!;
-  const val = root.querySelector<HTMLSpanElement>(`.gg-controls__force-${key}-val`)!;
+  const input = root.querySelector<HTMLInputElement>(
+    `.gg-controls__force-${key}`,
+  )!;
+  const val = root.querySelector<HTMLSpanElement>(
+    `.gg-controls__force-${key}-val`,
+  )!;
   input.addEventListener("input", () => {
     const v = Number(input.value);
     val.textContent = `${v.toFixed(1)}×`;

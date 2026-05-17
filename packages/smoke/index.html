@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <title>gitGraph renderer smoke test</title>
     <style>
-      html, body {
+      html,
+      body {
         margin: 0;
         height: 100%;
         background: #0f172a;
@@ -75,18 +76,42 @@
   <body>
     <div id="root">
       <header>
-        <div style="display:flex;align-items:center;gap:14px;">
+        <div style="display: flex; align-items: center; gap: 14px">
           <strong>gitGraph smoke test</strong>
           <div class="legend">
-            <span><span class="dot" style="background:#ef4444"></span>changed</span>
-            <span><span class="dot" style="background:#f97316"></span>downstream</span>
-            <span><span class="dot" style="background:#4ade80"></span>unaffected</span>
-            <span><span class="dot" style="background:#facc15;border-radius:0;width:8px;height:8px;border:2px solid #facc15"></span>core</span>
+            <span
+              ><span class="dot" style="background: #ef4444"></span
+              >changed</span
+            >
+            <span
+              ><span class="dot" style="background: #aa7316"></span
+              >downstream</span
+            >
+            <span
+              ><span class="dot" style="background: #4ade80"></span
+              >unaffected</span
+            >
+            <span
+              ><span
+                class="dot"
+                style="
+                  background: #facc15;
+                  border-radius: 0;
+                  width: 8px;
+                  height: 8px;
+                  border: 2px solid #facc15;
+                "
+              ></span
+              >core</span
+            >
           </div>
           <span id="status">loading…</span>
         </div>
         <div class="controls">
-          <input id="filter" placeholder="filter: text, folder:src, risk:>0.5, core:true" />
+          <input
+            id="filter"
+            placeholder="filter: text, folder:src, risk:>0.5, core:true"
+          />
           <button id="reset">Reset</button>
         </div>
       </header>

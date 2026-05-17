@@ -14,7 +14,11 @@ import {
   GitHubRateLimitError,
 } from "../github/client.js";
 import type { RepoLocator } from "../github/types.js";
-import { runScan, type ScanSnapshot, type ScanTarget } from "../orchestrator.js";
+import {
+  runScan,
+  type ScanSnapshot,
+  type ScanTarget,
+} from "../orchestrator.js";
 import { loadSettings, resolveMode } from "./storage.js";
 
 const OVERLAY_ID = "gitgraph-overlay-root";
@@ -112,7 +116,10 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
       finalDiffResult !== null &&
       finalRiskMap !== null
     ) {
-      console.log("[gitGraph] runScan done — swapping to final scene", completed);
+      console.log(
+        "[gitGraph] runScan done — swapping to final scene",
+        completed,
+      );
       if (mountPromise !== null) await mountPromise;
       finalSwapPromise = (async () => {
         const scene = buildSceneFromCore({
@@ -148,7 +155,13 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
           panel = mountControlsPanel(canvasHost, handle, { scene });
           palette = mountCommandPalette(canvasHost, handle, { scene });
           // Fire-and-forget — the branch list comes back async.
-          void wireBranchPicker(panel, client, locator, activeTarget, applyTarget);
+          void wireBranchPicker(
+            panel,
+            client,
+            locator,
+            activeTarget,
+            applyTarget,
+          );
         } else {
           existingPanel?.updateScene(scene);
           existingPalette?.updateScene(scene);
@@ -162,7 +175,10 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
     }
   } catch (e) {
     console.error("[gitGraph] scan/mount failed", e);
-    renderError(status, e, { hasToken: settings.githubToken !== undefined, locator });
+    renderError(status, e, {
+      hasToken: settings.githubToken !== undefined,
+      locator,
+    });
   }
 
   function close(): void {
@@ -194,11 +210,7 @@ export async function openOverlay(target: ScanTarget): Promise<void> {
         status.textContent = `${s.message} (${Math.round(s.progress * 100)}%)`;
       },
     });
-    if (
-      snap.graph === null ||
-      snap.diff === null ||
-      snap.risk === null
-    ) {
+    if (snap.graph === null || snap.diff === null || snap.risk === null) {
       throw new Error("re-scan returned no graph");
     }
     const newScene = buildSceneFromCore({
@@ -298,13 +310,19 @@ function renderError(
   if (e instanceof GitHubRateLimitError) {
     status.innerHTML = ctx.hasToken
       ? `<strong>Rate limit hit even with a token.</strong> Wait until ${
-          e.resetAt ? new Date(e.resetAt).toLocaleTimeString() : "the reset time"
+          e.resetAt
+            ? new Date(e.resetAt).toLocaleTimeString()
+            : "the reset time"
         } and try again, or use Light scan in the popup.`
       : `<strong>GitHub rate limit hit.</strong> Open the gitGraph popup and add a personal access token — that lifts the limit from 60/hr to 5000/hr.`;
     return;
   }
 
-  if (e instanceof GitHubHttpError && e.status === 404 && /\/pulls\/\d+/.test(e.url)) {
+  if (
+    e instanceof GitHubHttpError &&
+    e.status === 404 &&
+    /\/pulls\/\d+/.test(e.url)
+  ) {
     const org = ctx.locator.owner;
     if (!ctx.hasToken) {
       status.innerHTML = `<strong>Can't access this PR.</strong> It's likely private — open the gitGraph popup and add a GitHub token with access to <code>${escapeHtmlAttr(`${ctx.locator.owner}/${ctx.locator.repo}`)}</code>.`;
@@ -376,7 +394,8 @@ function renderFilesPanel(root: HTMLDivElement, snap: ScanSnapshot): void {
   // Show ALL files from the PR diff, not just the source-filtered set —
   // that way the user can see "yes my .md/.json files were intentionally
   // skipped" instead of wondering where they went.
-  const files = snap.allChangedFiles.length > 0 ? snap.allChangedFiles : snap.changedFiles;
+  const files =
+    snap.allChangedFiles.length > 0 ? snap.allChangedFiles : snap.changedFiles;
   const inGraph = files.filter((p) => parsed.has(p)).length;
   const total = files.length;
 
@@ -436,7 +455,7 @@ function buildShell(): HTMLDivElement {
         <strong>gitGraph</strong>
         <div class="gg-legend" style="display:flex;gap:12px;font-size:12px;color:#9ca3af;">
           <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>changed</span>
-          <span><span style="display:inline-block;width:10px;height:10px;background:#f97316;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>downstream</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#aa7316;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>downstream</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#4ade80;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>unaffected</span>
         </div>
       </div>

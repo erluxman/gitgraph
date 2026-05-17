@@ -33,7 +33,11 @@
         "importTracking": "import/export/part/part of directives",
         "flutterSupport": {
           "enabled": true,
-          "extras": ["Widget classes", "build() methods", "StatefulWidget lifecycle"]
+          "extras": [
+            "Widget classes",
+            "build() methods",
+            "StatefulWidget lifecycle"
+          ]
         }
       }
     ],
@@ -80,14 +84,32 @@
       "supported": true,
       "crossPackageEdges": true,
       "detection": "Look for package.json/pubspec.yaml in subdirectories",
-      "workspaceConfigParsing": ["pnpm-workspace.yaml", "package.json workspaces", "lerna.json", "melos.yaml"]
+      "workspaceConfigParsing": [
+        "pnpm-workspace.yaml",
+        "package.json workspaces",
+        "lerna.json",
+        "melos.yaml"
+      ]
     },
     "excludedPaths": {
       "defaults": [
-        "node_modules", "build", ".git", "dist", ".dart_tool",
-        "package-lock.json", "*.lock", "pnpm-lock.yaml", "bun.lockb",
-        "__pycache__", ".venv", "coverage", ".next", ".nuxt",
-        "*.generated.dart", "*.g.dart", "*.freezed.dart"
+        "node_modules",
+        "build",
+        ".git",
+        "dist",
+        ".dart_tool",
+        "package-lock.json",
+        "*.lock",
+        "pnpm-lock.yaml",
+        "bun.lockb",
+        "__pycache__",
+        ".venv",
+        "coverage",
+        ".next",
+        ".nuxt",
+        "*.generated.dart",
+        "*.g.dart",
+        "*.freezed.dart"
       ],
       "userConfigurable": true,
       "configLocation": ".gitgraph.json in repo root"
@@ -199,7 +221,7 @@
         "meaning": "file appears in the diff (was modified)"
       },
       "indirectlyAffected": {
-        "color": "#f97316",
+        "color": "#aa7316",
         "label": "orange",
         "meaning": "file imports a changed file (transitively) — may break"
       }
@@ -264,7 +286,12 @@
       "type": "full-screen modal with backdrop blur",
       "closeable": "X button + Escape key",
       "layout": "graph takes 100% of modal, toolbar pinned to top",
-      "toolbar": ["search bar", "legend (green/red/orange)", "close button", "settings gear"]
+      "toolbar": [
+        "search bar",
+        "legend (green/red/orange)",
+        "close button",
+        "settings gear"
+      ]
     },
     "dataFetching": {
       "repoTree": {
@@ -391,7 +418,7 @@
       "corePaths": ["array of file paths marked as critical"],
       "languages": {
         "description": "override language detection",
-        "example": {"src/**/*.mjs": "javascript"}
+        "example": { "src/**/*.mjs": "javascript" }
       }
     }
   },
