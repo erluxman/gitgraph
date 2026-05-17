@@ -35,6 +35,12 @@ export interface RendererHandle {
   /** Reset the camera to identity (zoom=1, centred origin). */
   resetView(): void;
   /**
+   * Scale + pan the camera so every file node fits within the visible
+   * canvas, with a small margin. Honours `maxZoom` so small graphs
+   * don't get zoomed to absurd sizes.
+   */
+  fitView(opts?: { padding?: number; maxZoom?: number }): void;
+  /**
    * Global node-radius multiplier. 1.0 is default; 0.5 halves all
    * radii (useful for very dense graphs); 2.0 doubles them.
    */
@@ -271,6 +277,9 @@ export async function mountRenderer(
       camera.x = 0;
       camera.y = 0;
     },
+    fitView(fitOpts) {
+      runFitView(fitOpts);
+    },
     setNodeScale(multiplier) {
       nodeScale = Math.max(0.1, Math.min(5, multiplier));
       rebuildNodeShapes();
@@ -417,7 +426,6 @@ export async function mountRenderer(
   function drawEdges(): void {
     edgeLayer.clear();
     const bounds = visibleSceneBounds();
-    const highlightSet = hoverId !== null ? highlightNeighbours(hoverId) : null;
     for (const edge of currentScene.edges) {
       const a = sceneNode(edge.source);
       const b = sceneNode(edge.target);
@@ -433,10 +441,14 @@ export async function mountRenderer(
       const bIn = inBounds(b.x, b.y, bounds);
       if (!aIn && !bIn) continue;
 
-      const baseAlpha = edgeAlpha(edge, highlightSet);
-      const colour = highlightSet?.has(a.id) && highlightSet.has(b.id)
-        ? EDGE_HIGHLIGHT_COLOUR
-        : EDGE_COLOUR;
+      // Highlight ONLY edges directly touching the hovered node.
+      // Neighbours-of-neighbours stay un-highlighted. Other edges fade
+      // to a faint background so the hovered node's direct connections
+      // stand out.
+      const isDirect = hoverId !== null && (a.id === hoverId || b.id === hoverId);
+      const someoneHovered = hoverId !== null;
+      const baseAlpha = someoneHovered ? (isDirect ? 0.95 : 0.08) : EDGE_ALPHA;
+      const colour = isDirect ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
       edgeLayer
         .moveTo(a.x, a.y)
         .lineTo(b.x, b.y)
@@ -574,6 +586,44 @@ export async function mountRenderer(
   }
 
   /**
+   * Pan + scale the camera so every file node's centre fits inside
+   * the visible canvas with a margin. Honours `maxZoom` so a tiny
+   * 3-file graph doesn't blow up to absurd magnification.
+   */
+  function runFitView(opts?: { padding?: number; maxZoom?: number }): void {
+    const padding = opts?.padding ?? 60;
+    const maxZoom = opts?.maxZoom ?? 1.2;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let visible = 0;
+    for (const view of nodeViews) {
+      const n = view.node;
+      if (n.kind === "child") continue;
+      if (n.x === undefined || n.y === undefined) continue;
+      if (filterMatched !== null && !filterMatched.has(n.id)) continue;
+      const r = nodeStyle(n).radius;
+      minX = Math.min(minX, n.x - r);
+      minY = Math.min(minY, n.y - r);
+      maxX = Math.max(maxX, n.x + r);
+      maxY = Math.max(maxY, n.y + r);
+      visible++;
+    }
+    if (visible === 0) return;
+    const w = app.renderer.width / (globalThis.devicePixelRatio ?? 1);
+    const h = app.renderer.height / (globalThis.devicePixelRatio ?? 1);
+    const graphW = Math.max(1, maxX - minX) + 2 * padding;
+    const graphH = Math.max(1, maxY - minY) + 2 * padding;
+    const zoom = Math.min(maxZoom, w / graphW, h / graphH);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    camera.scale.set(zoom);
+    camera.x = w / 2 - cx * zoom;
+    camera.y = h / 2 - cy * zoom;
+  }
+
+  /**
    * Current viewport in scene coordinates — the inverse of the camera
    * transform applied to the canvas rectangle. Includes a small pad so
    * nodes don't pop in and out right at the edge during pan.
@@ -634,24 +684,10 @@ export async function mountRenderer(
     return ref;
   }
 
-  function highlightNeighbours(id: string): Set<string> {
-    const out = new Set<string>([id]);
-    for (const e of currentScene.edges) {
-      const aid = typeof e.source === "string" ? e.source : e.source.id;
-      const bid = typeof e.target === "string" ? e.target : e.target.id;
-      if (aid === id) out.add(bid);
-      if (bid === id) out.add(aid);
-    }
-    return out;
-  }
-
-  function edgeAlpha(edge: SceneEdge, highlight: Set<string> | null): number {
-    if (highlight === null) return EDGE_ALPHA;
-    const aid = typeof edge.source === "string" ? edge.source : edge.source.id;
-    const bid = typeof edge.target === "string" ? edge.target : edge.target.id;
-    if (highlight.has(aid) && highlight.has(bid)) return 0.95;
-    return 0.08;
-  }
+  // (highlightNeighbours / edgeAlpha removed — hover edge highlighting
+  // is now computed inline in drawEdges. Direct-edge-only matches
+  // user intent: hovering a node lights up its connections without
+  // also lighting up neighbour-of-neighbour edges.)
 
   /** Threshold (px in scene coords) before a pointerdown counts as a drag, not a click. */
   const DRAG_THRESHOLD = 4;

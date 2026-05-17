@@ -77,7 +77,11 @@ export function mountControlsPanel(
   root.innerHTML = `
     <div class="gg-controls__header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #1e293b;cursor:pointer;user-select:none;background:linear-gradient(135deg, rgba(59,130,246,0.18), rgba(15,23,42,0.0) 60%);">
       <strong style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#cbd5e1;">Graph controls</strong>
-      <span class="gg-controls__toggle" style="font-size:14px;line-height:1;color:#94a3b8;">−</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button type="button" class="gg-controls__fit" title="Fit graph to view"
+          style="background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:4px;font-size:10px;padding:1px 8px;cursor:pointer;letter-spacing:0.04em;">FIT</button>
+        <span class="gg-controls__toggle" style="font-size:14px;line-height:1;color:#94a3b8;">−</span>
+      </div>
     </div>
     <div class="gg-controls__body" style="padding:10px 12px;width:240px;max-height:calc(100vh - 80px);overflow-y:auto;overflow-x:hidden;">
       <!-- Compare branches (populated by setBranchSelector) -->
@@ -144,8 +148,15 @@ export function mountControlsPanel(
     toggle.textContent = collapsed ? "+" : "−";
   };
   root.querySelector<HTMLDivElement>(".gg-controls__header")!
-    .addEventListener("click", () => {
+    .addEventListener("click", (e) => {
+      // Don't toggle the panel when the user clicked the FIT chip.
+      if ((e.target as HTMLElement).closest(".gg-controls__fit")) return;
       setCollapsed(body.style.display !== "none");
+    });
+  root.querySelector<HTMLButtonElement>(".gg-controls__fit")!
+    .addEventListener("click", (e) => {
+      e.stopPropagation();
+      handle.fitView();
     });
 
   // --- Impact filter chips (clickable) ---
