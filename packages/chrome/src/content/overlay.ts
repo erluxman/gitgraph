@@ -436,7 +436,7 @@ function buildShell(): HTMLDivElement {
         <strong>gitGraph</strong>
         <div class="gg-legend" style="display:flex;gap:12px;font-size:12px;color:#9ca3af;">
           <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>changed</span>
-          <span><span style="display:inline-block;width:10px;height:10px;background:#f97316;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>downstream</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>downstream</span>
           <span><span style="display:inline-block;width:10px;height:10px;background:#4ade80;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>unaffected</span>
         </div>
       </div>
