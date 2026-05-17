@@ -18,11 +18,27 @@ function node(overrides: Partial<SceneNode>): SceneNode {
 }
 
 describe("nodeStyle", () => {
-  it("uses the green base colour for unaffected files", () => {
-    const s = nodeStyle(node({ impact: "green" }));
-    // Green base, darkened to ~35% intensity → still a recognisable green shade.
-    expect(s.fill).not.toBe(COLOURS.red);
-    expect(s.fill).not.toBe(COLOURS.orange);
+  it("renders each impact at its flat base colour, full opacity", () => {
+    const green = nodeStyle(node({ impact: "green" }));
+    const orange = nodeStyle(node({ impact: "orange", distance: 1 }));
+    const red = nodeStyle(node({ impact: "red" }));
+    expect(green.fill).toBe(COLOURS.green);
+    expect(orange.fill).toBe(COLOURS.orange);
+    expect(red.fill).toBe(COLOURS.red);
+    expect(green.alpha).toBe(1);
+    expect(orange.alpha).toBe(1);
+    expect(red.alpha).toBe(1);
+  });
+
+  it("does not fade orange by distance or red by risk", () => {
+    const closeOrange = nodeStyle(node({ impact: "orange", distance: 1 }));
+    const farOrange = nodeStyle(node({ impact: "orange", distance: 9 }));
+    expect(closeOrange.fill).toBe(farOrange.fill);
+    expect(closeOrange.alpha).toBe(farOrange.alpha);
+
+    const calmRed = nodeStyle(node({ impact: "red", risk: 0 }));
+    const riskyRed = nodeStyle(node({ impact: "red", risk: 1 }));
+    expect(calmRed.fill).toBe(riskyRed.fill);
   });
 
   it("scales radius with export count", () => {
@@ -39,21 +55,6 @@ describe("nodeStyle", () => {
     expect(zeroExports.radius).toBeGreaterThanOrEqual(16);
   });
 
-  it("orange nodes get fading alpha proportional to distance", () => {
-    const close = nodeStyle(node({ impact: "orange", distance: 1 }));
-    const far = nodeStyle(node({ impact: "orange", distance: 5 }));
-    expect(close.alpha).toBeGreaterThan(far.alpha);
-    expect(close.alpha).toBeCloseTo(1, 5);
-    expect(far.alpha).toBeCloseTo(0.4, 5);
-  });
-
-  it("red nodes get higher intensity with higher risk", () => {
-    const low = nodeStyle(node({ impact: "red", risk: 0 }));
-    const high = nodeStyle(node({ impact: "red", risk: 1 }));
-    // Higher risk → brighter (closer to full red).
-    expect(redChannel(high.fill)).toBeGreaterThan(redChannel(low.fill));
-  });
-
   it("adds a glow border for core paths", () => {
     const plain = nodeStyle(node({ core: false }));
     const core = nodeStyle(node({ core: true }));
@@ -62,7 +63,3 @@ describe("nodeStyle", () => {
     expect(core.borderWidth).toBeGreaterThan(0);
   });
 });
-
-function redChannel(hex: number): number {
-  return (hex >> 16) & 0xff;
-}

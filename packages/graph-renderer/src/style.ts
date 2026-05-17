@@ -1,9 +1,10 @@
 import type { SceneNode } from "./types.js";
 
 /**
- * SPEC.md → "Color Coding".
- * These are the *base* hues; the actual rendered colour is the base
- * blended with white toward `(1 - intensity)`.
+ * Three flat colours for the file-impact palette. A file is either
+ * safe (green), downstream-affected (orange), or changed (red), and
+ * reads as that exact hue at full opacity — no risk-driven darkening
+ * and no fade by BFS distance.
  */
 export const COLOURS = {
   green: 0x4ade80,
@@ -43,10 +44,11 @@ export function nodeStyle(
 ): NodeStyle {
   const o = { ...DEFAULT_OPTS, ...opts };
 
-  // Child satellite nodes use a fixed, small radius. They inherit the
-  // parent's impact colour but stay visually subordinate.
+  // Child satellite nodes use a fixed, small radius and a darkened
+  // version of their parent's colour so they read as subordinate to
+  // the file they orbit. File nodes themselves never darken.
   if (node.kind === "child") {
-    const childColour = darken(baseColourFor(node), 0.55);
+    const childColour = darkenChild(baseColourFor(node));
     return {
       radius: 4,
       fill: childColour,
@@ -60,28 +62,17 @@ export function nodeStyle(
   // Changed (red) files are the most important thing on screen — make
   // them prominent even when they have zero exports (e.g. test files,
   // config-like JS). Orange is bumped a little so consumers don't get
-  // lost when the changed file is huge.
+  // lost when the changed file is huge. Plain green files keep the
+  // default radius scale.
   const baseRadius = scaleRadius(node.exportCount, o);
   const minForImpact =
     node.impact === "red" ? 16 : node.impact === "orange" ? 9 : o.minRadius;
   const radius = Math.max(baseRadius, minForImpact);
-  const baseColour = baseColourFor(node);
-  // Intensity is 0..1. Red/orange darken with risk; green stays muted.
-  // Orange additionally fades by BFS distance.
-  const intensity =
-    node.impact === "red"
-      ? clamp01(0.5 + 0.5 * node.risk)
-      : node.impact === "orange"
-        ? clamp01(0.4 + 0.5 * node.risk) * orangeFade(node.distance)
-        : 0.35;
-  const fill = darken(baseColour, intensity);
-  const alpha =
-    node.impact === "orange" ? Math.max(0.4, orangeFade(node.distance)) : 1;
 
   return {
     radius,
-    fill,
-    alpha,
+    fill: baseColourFor(node),
+    alpha: 1,
     borderColour: node.core ? COLOURS.core : null,
     borderWidth: node.core ? 2 : 0,
     labelColour: 0xe5e7eb,
@@ -103,28 +94,14 @@ function baseColourFor(node: SceneNode): number {
   return COLOURS.green;
 }
 
-/** Multiply a hex colour by `intensity` (0..1). */
-function darken(hex: number, intensity: number): number {
+/** Darken a hex colour to 55% intensity — used only for child satellites. */
+function darkenChild(hex: number): number {
   const r = (hex >> 16) & 0xff;
   const g = (hex >> 8) & 0xff;
   const b = hex & 0xff;
-  const k = clamp01(intensity);
+  const k = 0.55;
   const newR = Math.round(r * k);
   const newG = Math.round(g * k);
   const newB = Math.round(b * k);
   return (newR << 16) | (newG << 8) | newB;
-}
-
-function orangeFade(distance: number): number {
-  if (distance <= 1) return 1;
-  if (distance === 2) return 0.8;
-  if (distance === 3) return 0.6;
-  if (distance === 4) return 0.4;
-  return 0.2;
-}
-
-function clamp01(v: number): number {
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
 }
