@@ -898,30 +898,22 @@ export async function mountRenderer(
       }
     }
 
-    // UP walk — files that consume this one, transitively. Always runs
-    // for red/orange nodes; for green there is no UP walk because we
-    // return early above.
+    // UP walk — DIRECT importers only (one level out). Full transitive
+    // chain on the dotted side made the highlight too noisy; capping at
+    // one step keeps the cause-side (solid) the protagonist while still
+    // answering "who does this propagate to next". Distance filter stays
+    // so we only show consumers whose shortest red-path runs through
+    // the hovered file.
     {
-      const seen = new Set<string>([node.id]);
-      const queue: string[] = [node.id];
-      while (queue.length > 0) {
-        const curId = queue.shift()!;
-        const cur = nodeById.get(curId);
-        if (cur === undefined) continue;
-        const ins = incomingIds.get(curId);
-        if (ins === undefined) continue;
+      const ins = incomingIds.get(node.id);
+      if (ins !== undefined) {
         for (const sId of ins) {
           const sNode = nodeById.get(sId);
           if (sNode === undefined) continue;
           if (!Number.isFinite(sNode.distance)) continue;
-          if (sNode.distance !== cur.distance + 1) continue;
-          // Importer sId depends on imported curId.
-          up.add(edgeKey(sId, curId));
-          if (!seen.has(sId)) {
-            seen.add(sId);
-            nodes.add(sId);
-            queue.push(sId);
-          }
+          if (sNode.distance !== node.distance + 1) continue;
+          up.add(edgeKey(sId, node.id));
+          nodes.add(sId);
         }
       }
     }
