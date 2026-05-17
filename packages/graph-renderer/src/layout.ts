@@ -32,6 +32,16 @@ export interface LayoutHandle {
   pin(node: SceneNode, x: number, y: number): void;
   /** Release a pinned node (drag-end). */
   unpin(node: SceneNode): void;
+  /**
+   * Live-tune force strengths. Values are multipliers on the defaults
+   * (1 = no change, 2 = double, 0 = effectively off). Lets the controls
+   * panel tweak the layout without restarting the simulation.
+   */
+  setStrengths(opts: {
+    readonly charge?: number;
+    readonly link?: number;
+    readonly collision?: number;
+  }): void;
   /** Stop ticking. Idempotent. */
   stop(): void;
 }
@@ -115,6 +125,27 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
     unpin(node) {
       node.fx = null;
       node.fy = null;
+    },
+    setStrengths(s) {
+      if (s.charge !== undefined) {
+        const force = sim.force("charge") as {
+          strength?: (v: number) => unknown;
+        } | null;
+        force?.strength?.(chargeStrength * s.charge);
+      }
+      if (s.link !== undefined) {
+        const force = sim.force("link") as {
+          strength?: (v: number) => unknown;
+        } | null;
+        force?.strength?.(0.4 * s.link);
+      }
+      if (s.collision !== undefined) {
+        const force = sim.force("collide") as {
+          strength?: (v: number) => unknown;
+        } | null;
+        force?.strength?.(s.collision);
+      }
+      sim.alpha(0.3).restart();
     },
     stop() {
       sim.stop();

@@ -111,6 +111,48 @@ describe("buildGraph", () => {
     ]);
   });
 
+  it("infers direct edges through a single-hop barrel re-export", () => {
+    const repo = repoFromSources({
+      "src/leaf.ts": `export const x = 1;`,
+      "src/barrel.ts": `export * from "./leaf";`,
+      "src/consumer.ts": `import { x } from "./barrel";`,
+    });
+    const graph = buildGraph({ repo });
+    // The explicit edges are still there.
+    expect(getDependencies(graph, "src/consumer.ts")).toContain("src/barrel.ts");
+    expect(getDependencies(graph, "src/barrel.ts")).toContain("src/leaf.ts");
+    // Plus a NEW inferred edge: consumer → leaf, so a change to leaf
+    // visually connects to its real consumer.
+    expect(getDependencies(graph, "src/consumer.ts")).toContain("src/leaf.ts");
+  });
+
+  it("infers direct edges through a multi-hop barrel chain", () => {
+    const repo = repoFromSources({
+      "src/leaf.ts": `export const x = 1;`,
+      "src/inner.ts": `export * from "./leaf";`,
+      "src/outer.ts": `export * from "./inner";`,
+      "src/consumer.ts": `import { x } from "./outer";`,
+    });
+    const graph = buildGraph({ repo });
+    expect(getDependencies(graph, "src/consumer.ts")).toContain("src/leaf.ts");
+  });
+
+  it("does not flatten a file that mixes imports and re-exports (not a barrel)", () => {
+    // A file with both `import` and `export from` is NOT a barrel;
+    // its imports are load-bearing. We should leave it alone.
+    const repo = repoFromSources({
+      "src/leaf.ts": `export const x = 1;`,
+      "src/mixed.ts": `import "./side-effect"; export * from "./leaf";`,
+      "src/side-effect.ts": ``,
+      "src/consumer.ts": `import { x } from "./mixed";`,
+    });
+    const graph = buildGraph({ repo });
+    // consumer → mixed: yes (direct import).
+    expect(getDependencies(graph, "src/consumer.ts")).toContain("src/mixed.ts");
+    // consumer → leaf: NO inference; mixed isn't a pure barrel.
+    expect(getDependencies(graph, "src/consumer.ts")).not.toContain("src/leaf.ts");
+  });
+
   it("inverts direction for Dart 'part of' directives", () => {
     const repo = repoFromSources({
       "lib/main.dart": `part 'helper.dart';\nclass Main {}`,

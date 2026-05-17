@@ -30,6 +30,26 @@ export interface RendererHandle {
   setFilter(matched: ReadonlySet<string> | null): void;
   /** Resize the canvas (responsive layout). */
   resize(width: number, height: number): void;
+  /** Center the camera on the named node, optionally zooming in. */
+  focusNode(id: string, opts?: { zoom?: number; pulse?: boolean }): void;
+  /**
+   * Global node-radius multiplier. 1.0 is default; 0.5 halves all
+   * radii (useful for very dense graphs); 2.0 doubles them.
+   */
+  setNodeScale(multiplier: number): void;
+  /** Show all labels (`always`), never (`never`), or fade by zoom (`auto`). */
+  setLabelMode(mode: "always" | "never" | "auto"): void;
+  /**
+   * Auto-mode threshold: labels reach full opacity when zoom ≥ this
+   * value. Default 0.8. Lower = labels appear sooner when zooming in.
+   */
+  setLabelZoomThreshold(threshold: number): void;
+  /** Live-tune the simulation forces. Pass partial overrides. */
+  setForceStrengths(opts: {
+    readonly charge?: number;
+    readonly link?: number;
+    readonly collision?: number;
+  }): void;
   /** Tear down everything. */
   destroy(): void;
 }
@@ -103,6 +123,14 @@ export async function mountRenderer(
   // File nodes currently showing satellite children. Toggled via
   // single-click on a file node.
   const expanded = new Set<string>();
+  // Controls-panel-driven state. None of these affect tests; they're
+  // pure visual / interaction tweaks.
+  let nodeScale = 1;
+  let labelMode: "always" | "never" | "auto" = "auto";
+  let labelZoomThreshold = 0.8;
+  // Brief highlight after focusNode — counts down each tick.
+  let pulseId: string | null = null;
+  let pulseFrames = 0;
 
   // Camera controls.
   let panning = false;
@@ -186,6 +214,36 @@ export async function mountRenderer(
     resize(width: number, height: number) {
       app.renderer.resize(width, height);
     },
+    focusNode(id, opts2) {
+      const node = currentScene.nodes.find((n) => n.id === id);
+      if (node === undefined) return;
+      if (node.x === undefined || node.y === undefined) return;
+      // Set zoom first, then translate the camera so the node lands
+      // at the canvas center. Camera transform is in screen coords.
+      const zoom = opts2?.zoom ?? Math.max(camera.scale.x, 1.2);
+      camera.scale.set(zoom);
+      const w = app.renderer.width / (globalThis.devicePixelRatio ?? 1);
+      const h = app.renderer.height / (globalThis.devicePixelRatio ?? 1);
+      camera.x = w / 2 - node.x * zoom;
+      camera.y = h / 2 - node.y * zoom;
+      if (opts2?.pulse !== false) {
+        pulseId = id;
+        pulseFrames = 60; // ~1s at 60fps
+      }
+    },
+    setNodeScale(multiplier) {
+      nodeScale = Math.max(0.1, Math.min(5, multiplier));
+      rebuildNodeShapes();
+    },
+    setLabelMode(mode) {
+      labelMode = mode;
+    },
+    setLabelZoomThreshold(threshold) {
+      labelZoomThreshold = Math.max(0.1, Math.min(5, threshold));
+    },
+    setForceStrengths(strengths) {
+      layout.setStrengths(strengths);
+    },
     destroy() {
       layout.stop();
       app.destroy(true, { children: true, texture: true });
@@ -201,7 +259,7 @@ export async function mountRenderer(
     );
 
     for (const node of currentScene.nodes) {
-      const style = nodeStyle(node, { maxExports });
+      const style = scaledStyle(node, maxExports);
       const g = new Graphics();
       drawNode(g, style, node);
       g.eventMode = "static";
@@ -308,6 +366,8 @@ export async function mountRenderer(
   }
 
   function drawNodes(): void {
+    const labelAlpha = computeLabelAlpha();
+    if (pulseFrames > 0) pulseFrames--;
     for (const view of nodeViews) {
       const { node, graphic, label } = view;
       if (node.x === undefined || node.y === undefined) continue;
@@ -318,7 +378,54 @@ export async function mountRenderer(
         filterMatched !== null && !filterMatched.has(node.id) ? FADED_ALPHA : null;
       const baseAlpha = nodeStyle(node).alpha;
       graphic.alpha = dim ?? baseAlpha;
-      label.alpha = dim ?? 0.85;
+      label.alpha = dim ?? labelAlpha;
+
+      // Brief pulse highlight after focusNode — scale + fade in/out.
+      if (pulseId === node.id && pulseFrames > 0) {
+        const t = pulseFrames / 60;
+        const scale = 1 + Math.sin((1 - t) * Math.PI) * 0.35;
+        graphic.scale.set(scale);
+      } else if (graphic.scale.x !== 1) {
+        graphic.scale.set(1);
+      }
+    }
+  }
+
+  /** Auto / always / never label-alpha computation. */
+  function computeLabelAlpha(): number {
+    if (labelMode === "never") return 0;
+    if (labelMode === "always") return 0.85;
+    // auto: fade in proportional to zoom past the threshold.
+    const z = camera.scale.x;
+    if (z >= labelZoomThreshold) return 0.85;
+    // Fade smoothly from 0 at z=0 to 0.85 at z=threshold.
+    return Math.max(0, (z / labelZoomThreshold) * 0.85);
+  }
+
+  /** Wrap nodeStyle with the global radius multiplier from setNodeScale. */
+  function scaledStyle(
+    node: SceneNode,
+    maxExports: number,
+  ): ReturnType<typeof nodeStyle> {
+    const base = nodeStyle(node, { maxExports });
+    if (nodeScale === 1) return base;
+    return { ...base, radius: base.radius * nodeScale };
+  }
+
+  /**
+   * Re-draw every node's graphics with the current `nodeScale`. Cheap
+   * because we don't rebuild the simulation or recreate child views —
+   * we just `g.clear()` + redraw at the new radius.
+   */
+  function rebuildNodeShapes(): void {
+    const maxExports = currentScene.nodes.reduce(
+      (m, n) => (n.exportCount > m ? n.exportCount : m),
+      1,
+    );
+    for (const view of nodeViews) {
+      const style = scaledStyle(view.node, maxExports);
+      drawNode(view.graphic, style, view.node);
+      view.label.anchor.set(0.5, -0.4 - style.radius / 12);
     }
   }
 
