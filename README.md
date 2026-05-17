@@ -16,11 +16,26 @@ extension (for your local workspace, no GitHub API needed).
 
 ## Quickstart
 
-### Chrome extension
+Two one-liners. Both scripts handle Bun install, deps, build, and packaging
+for you, then print what to do next.
+
+```sh
+./chrome_extension.sh    # Chrome extension → builds and copies to ~/.local/share/gitgraph-chrome
+./vscode_extension.sh    # VS Code extension → packs and installs via `code --install-extension`
+```
+
+After running them:
+
+- **Chrome**: open `chrome://extensions/` → Developer mode → Load unpacked → pick the path the script prints
+- **VS Code**: the extension is already installed; click the gitGraph icon (three circles) in the activity bar
+
+The sections below describe what each script does and how to do it by hand.
+
+### Chrome — manual install
 
 ```sh
 bun install
-bun run build --filter=@gitgraph/chrome
+bun run --cwd packages/chrome build
 ```
 
 Then in Chrome:
@@ -35,20 +50,11 @@ Then in Chrome:
 6. Or, from the popup: pick a base branch + (optional) compare branch on any
    `github.com/<org>/<repo>` page → "Open graph in current tab"
 
-### VS Code extension
+### VS Code — manual install
 
 ```sh
 bun install
-bun run build --filter=gitgraph-vscode
-```
-
-To install:
-
-```sh
-# Package as .vsix
 bun run --cwd packages/vscode pack
-
-# Install the resulting file
 code --install-extension packages/vscode/gitgraph-vscode-0.1.0.vsix
 ```
 

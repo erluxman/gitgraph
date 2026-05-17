@@ -157,6 +157,12 @@ export async function mountRenderer(
       panning = false;
       panStart = null;
     },
+    onPanBy(dx, dy) {
+      // Trackpad two-finger swipe: nudge the camera by raw screen
+      // deltas. No start/end pairing — each scroll event is atomic.
+      camera.x += dx;
+      camera.y += dy;
+    },
   });
 
   buildNodeViews();
@@ -607,6 +613,8 @@ interface CameraCallbacks {
   onPanStart(x: number, y: number): void;
   onPanMove(x: number, y: number): void;
   onPanEnd(): void;
+  /** Direct delta pan for trackpad two-finger swipes (no start/move/end). */
+  onPanBy(dx: number, dy: number): void;
 }
 
 function setupCamera(
@@ -617,19 +625,46 @@ function setupCamera(
   app.stage.eventMode = "static";
   app.stage.hitArea = app.renderer.screen;
 
-  // Scroll → zoom. Middle-click drag → pan.
+  // --- Wheel: pinch-zoom vs trackpad-swipe vs mouse-wheel ---
+  //
+  // Pinch on macOS sends `wheel` with ctrlKey=true. Two-finger trackpad
+  // swipes send `wheel` with deltaMode=0 (pixels) and fractional or
+  // small (<50) deltas. Mouse wheels typically send larger integer
+  // deltas. We use these signals to pick zoom vs pan.
   app.canvas.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const factor = Math.exp(-e.deltaY * 0.001);
-      const next = Math.min(8, Math.max(0.1, _container.scale.x * factor));
-      const rect = app.canvas.getBoundingClientRect();
-      cb.onScale(next, e.clientX - rect.left, e.clientY - rect.top);
+      const isPinch = e.ctrlKey;
+      const isTrackpadSwipe =
+        !isPinch &&
+        e.deltaMode === 0 &&
+        (e.deltaX !== 0 ||
+          (Math.abs(e.deltaY) < 50 && !Number.isInteger(e.deltaY)) ||
+          // Pure horizontal swipe → always pan.
+          Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.5);
+      if (isPinch) {
+        // Pinch step — smaller exponent so the zoom feels precise.
+        const factor = Math.exp(-e.deltaY * 0.01);
+        applyZoom(factor, e);
+      } else if (isTrackpadSwipe) {
+        cb.onPanBy(-e.deltaX, -e.deltaY);
+      } else {
+        // Mouse wheel → standard zoom.
+        const factor = Math.exp(-e.deltaY * 0.001);
+        applyZoom(factor, e);
+      }
     },
     { passive: false },
   );
 
+  function applyZoom(factor: number, e: WheelEvent): void {
+    const next = Math.min(8, Math.max(0.1, _container.scale.x * factor));
+    const rect = app.canvas.getBoundingClientRect();
+    cb.onScale(next, e.clientX - rect.left, e.clientY - rect.top);
+  }
+
+  // --- Middle-click drag pan (existing behaviour) ---
   let middleDown = false;
   app.canvas.addEventListener("pointerdown", (e) => {
     if (e.button === 1) {
@@ -653,4 +688,33 @@ function setupCamera(
     }
   });
   app.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // --- Left-click drag on the empty background → pan ---
+  //
+  // Listen at the stage level so events fire only when no node was hit
+  // (PIXI dispatches to the deepest target first; node graphics consume
+  // it before it bubbles here).
+  let bgDown = false;
+  let bgStart = { x: 0, y: 0 };
+  app.stage.on("pointerdown", (ev) => {
+    if (ev.target !== app.stage) return; // a node consumed it
+    if (ev.button !== 0) return;
+    bgDown = true;
+    bgStart = { x: ev.global.x, y: ev.global.y };
+    cb.onPanStart(ev.global.x, ev.global.y);
+  });
+  app.stage.on("globalpointermove", (ev) => {
+    if (!bgDown) return;
+    cb.onPanMove(ev.global.x, ev.global.y);
+  });
+  const endBgPan = () => {
+    if (!bgDown) return;
+    bgDown = false;
+    cb.onPanEnd();
+  };
+  app.stage.on("pointerup", endBgPan);
+  app.stage.on("pointerupoutside", endBgPan);
+  // Suppress the unused `bgStart` lint — we read .x/.y in onPanStart so
+  // the recorded values exist for the caller to use if desired.
+  void bgStart;
 }
