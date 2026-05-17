@@ -206,6 +206,25 @@ export async function mountRenderer(
     drawNodes();
   });
 
+  // Post-mount sanity check: the container's measured size at mount
+  // time may have been pre-layout (smaller than its eventual size).
+  // After the browser has had a moment to settle, re-measure and
+  // resize the renderer + simulation if the container grew. Without
+  // this the layout pulls nodes to a stale (smaller) centre, leaving
+  // the visible graph stuck in the top-left quadrant of the real
+  // canvas.
+  requestAnimationFrame(() => {
+    const r = opts.container.getBoundingClientRect();
+    if (r.width > 1 && r.height > 1) {
+      const cssW = app.renderer.width / (globalThis.devicePixelRatio ?? 1);
+      const cssH = app.renderer.height / (globalThis.devicePixelRatio ?? 1);
+      if (Math.abs(r.width - cssW) > 4 || Math.abs(r.height - cssH) > 4) {
+        app.renderer.resize(r.width, r.height);
+        layout.setBounds(r.width, r.height);
+      }
+    }
+  });
+
   return {
     async setScene(next: Scene) {
       layout.stop();
@@ -254,6 +273,10 @@ export async function mountRenderer(
     },
     resize(width: number, height: number) {
       app.renderer.resize(width, height);
+      // Keep the layout's force-centre in sync. Without this, the
+      // simulation keeps pulling nodes to the OLD canvas centre,
+      // which ends up in the top-left quadrant of the new canvas.
+      layout.setBounds(width, height);
     },
     focusNode(id, opts2) {
       const node = currentScene.nodes.find((n) => n.id === id);

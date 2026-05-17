@@ -42,6 +42,14 @@ export interface LayoutHandle {
     readonly link?: number;
     readonly collision?: number;
   }): void;
+  /**
+   * Update the layout's target dimensions. The center force re-aims
+   * at (w/2, h/2) and the folder forces' fallback target follows.
+   * Without this, a container that grows after mount leaves the
+   * simulation pulling nodes to the OLD (smaller) centre — which
+   * ends up in the top-left quadrant of the new canvas.
+   */
+  setBounds(w: number, h: number): void;
   /** Stop ticking. Idempotent. */
   stop(): void;
 }
@@ -58,7 +66,10 @@ export interface LayoutHandle {
  * which the renderer reads on its next frame.
  */
 export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
-  const { width, height } = opts;
+  // Mutable so setBounds() can grow the layout's working dimensions
+  // after the container resizes (initial mount measures may be stale).
+  let width = opts.width;
+  let height = opts.height;
   const chargeStrength = opts.chargeStrength ?? -300;
   const linkDistance = opts.linkDistance ?? 75;
   const folderStrength = opts.folderStrength ?? 0.04;
@@ -81,7 +92,13 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
         .strength(0.4),
     )
     .force("charge", forceManyBody<SceneNode>().strength(chargeStrength))
-    .force("center", forceCenter(width / 2, height / 2).strength(0.05))
+    // Center strength bumped from 0.05 → 0.25. With charge at -300 the
+    // cluster wanted to escape the gentle pull and ended up drifting
+    // into the top-left quadrant of the canvas (because d3's
+    // phyllotactic seed positions start near scene origin and the
+    // weak centre force couldn't migrate the whole cluster fast
+    // enough before alpha decayed).
+    .force("center", forceCenter(width / 2, height / 2).strength(0.25))
     // Collision radius accounts for the label and file-type icon
     // rendered below each node — d3-force's collision is circular and
     // doesn't know about the label rectangle, so we just pad the
@@ -158,6 +175,29 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
         force?.strength?.(s.collision);
       }
       sim.alpha(0.3).restart();
+    },
+    setBounds(w, h) {
+      // Ignore obviously bad inputs.
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+        return;
+      }
+      // Only react to a real change — and only restart the sim if the
+      // change is meaningful, so a 1-pixel browser-zoom event doesn't
+      // re-shake the layout.
+      const dw = Math.abs(w - width);
+      const dh = Math.abs(h - height);
+      width = w;
+      height = h;
+      // Update the centre force to aim at the new middle.
+      const centre = sim.force("center") as {
+        x?: (v: number) => unknown;
+        y?: (v: number) => unknown;
+      } | null;
+      centre?.x?.(width / 2);
+      centre?.y?.(height / 2);
+      // Reheat only if it's a substantial size change so nodes don't
+      // get nudged on minor resizes.
+      if (dw > 50 || dh > 50) sim.alpha(0.3).restart();
     },
     stop() {
       sim.stop();
