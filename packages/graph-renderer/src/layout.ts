@@ -92,13 +92,25 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
         .strength(0.4),
     )
     .force("charge", forceManyBody<SceneNode>().strength(chargeStrength))
-    // Center strength bumped from 0.05 → 0.25. With charge at -300 the
-    // cluster wanted to escape the gentle pull and ended up drifting
-    // into the top-left quadrant of the canvas (because d3's
-    // phyllotactic seed positions start near scene origin and the
-    // weak centre force couldn't migrate the whole cluster fast
-    // enough before alpha decayed).
+    // Centroid pull — keeps the cluster's centre of mass at the canvas
+    // centre. Bumped from 0.05 → 0.25 so this actually anchors the
+    // cluster instead of getting overpowered by the stronger charge.
     .force("center", forceCenter(width / 2, height / 2).strength(0.25))
+    // PER-NODE soft pull toward the centre, on top of the centroid
+    // pull above. On large graphs, charge can shoot outlier nodes
+    // hundreds of px off-screen, dragging the centroid with them.
+    // forceCenter compensates by translating the whole cluster — but
+    // that visibly shoves the cluster to one side. A weak per-node
+    // X/Y pull keeps individual nodes near the canvas so no one ever
+    // escapes far enough to break the layout.
+    .force(
+      "anchorX",
+      forceX<SceneNode>().strength(0.03).x(() => width / 2),
+    )
+    .force(
+      "anchorY",
+      forceY<SceneNode>().strength(0.03).y(() => height / 2),
+    )
     // Collision radius accounts for the label and file-type icon
     // rendered below each node — d3-force's collision is circular and
     // doesn't know about the label rectangle, so we just pad the
