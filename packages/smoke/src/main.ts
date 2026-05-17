@@ -9,6 +9,7 @@ import {
 import {
   applyFilter,
   buildSceneFromCore,
+  mountCommandPalette,
   mountControlsPanel,
   mountRenderer,
   parseFilter,
@@ -127,6 +128,8 @@ async function main(): Promise<void> {
 
   // Floating controls panel (search, label fade, node size, forces).
   mountControlsPanel(host, handle, { scene });
+  // Cmd+K / `/` global file palette.
+  mountCommandPalette(host, handle, { scene });
 
   const filterInput = document.getElementById("filter") as HTMLInputElement;
   const resetButton = document.getElementById("reset") as HTMLButtonElement;

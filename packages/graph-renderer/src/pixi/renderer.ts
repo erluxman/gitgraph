@@ -32,6 +32,8 @@ export interface RendererHandle {
   resize(width: number, height: number): void;
   /** Center the camera on the named node, optionally zooming in. */
   focusNode(id: string, opts?: { zoom?: number; pulse?: boolean }): void;
+  /** Reset the camera to identity (zoom=1, centred origin). */
+  resetView(): void;
   /**
    * Global node-radius multiplier. 1.0 is default; 0.5 halves all
    * radii (useful for very dense graphs); 2.0 doubles them.
@@ -114,8 +116,11 @@ export async function mountRenderer(
     readonly node: SceneNode;
     readonly graphic: Graphics;
     readonly label: Text;
+    /** performance.now() when this view was first rendered — drives the fade-in. */
+    readonly bornAt: number;
   };
   let nodeViews: NodeView[] = [];
+  const FADE_IN_MS = 320;
   let currentScene: Scene = scene;
   let layout: LayoutHandle = createLayout(scene, fullLayoutOpts(opts));
   let hoverId: string | null = null;
@@ -237,6 +242,11 @@ export async function mountRenderer(
         pulseFrames = 60; // ~1s at 60fps
       }
     },
+    resetView() {
+      camera.scale.set(1);
+      camera.x = 0;
+      camera.y = 0;
+    },
     setNodeScale(multiplier) {
       nodeScale = Math.max(0.1, Math.min(5, multiplier));
       rebuildNodeShapes();
@@ -295,7 +305,7 @@ export async function mountRenderer(
       label.anchor.set(0.5, -0.4 - style.radius / 12);
       labelLayer.addChild(label);
 
-      nodeViews.push({ node, graphic: g, label });
+      nodeViews.push({ node, graphic: g, label, bornAt: performance.now() });
     }
   }
 
@@ -373,9 +383,10 @@ export async function mountRenderer(
 
   function drawNodes(): void {
     const labelAlpha = computeLabelAlpha();
+    const now = performance.now();
     if (pulseFrames > 0) pulseFrames--;
     for (const view of nodeViews) {
-      const { node, graphic, label } = view;
+      const { node, graphic, label, bornAt } = view;
       if (node.x === undefined || node.y === undefined) continue;
       graphic.position.set(node.x, node.y);
       label.position.set(node.x, node.y);
@@ -383,8 +394,21 @@ export async function mountRenderer(
       const dim =
         filterMatched !== null && !filterMatched.has(node.id) ? FADED_ALPHA : null;
       const baseAlpha = nodeStyle(node).alpha;
-      graphic.alpha = dim ?? baseAlpha;
-      label.alpha = dim ?? labelAlpha;
+
+      // Fade in newly-added nodes over FADE_IN_MS.
+      const age = now - bornAt;
+      const fadeIn = age < FADE_IN_MS ? age / FADE_IN_MS : 1;
+
+      // Slow ambient pulse on red (changed) file nodes — 0.85..1.0
+      // alpha multiplier on a 2.4s sin wave. Subtle but draws the
+      // eye to "active" files without animation noise.
+      const redPulse =
+        node.impact === "red" && node.kind !== "child"
+          ? 0.85 + 0.15 * (0.5 + 0.5 * Math.sin(now / 380))
+          : 1;
+
+      graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse;
+      label.alpha = (dim ?? labelAlpha) * fadeIn;
 
       // Brief pulse highlight after focusNode — scale + fade in/out.
       if (pulseId === node.id && pulseFrames > 0) {
