@@ -43,6 +43,22 @@ export interface LayoutHandle {
     readonly collision?: number;
   }): void;
   /**
+   * Tune d3-force's velocityDecay directly. Lower = nodes keep their
+   * velocity longer (more inertia / less viscous), higher = velocity
+   * dies fast (settled, viscous). Useful for the "viscosity" control
+   * which pairs this with the nudge() impulse so the graph can wobble
+   * when the camera moves and slowly settle.
+   */
+  setVelocityDecay(decay: number): void;
+  /**
+   * Apply a random velocity impulse to every unpinned node, scaled by
+   * `magnitude`. Each component is drawn from [-magnitude, magnitude]
+   * and added to the node's vx/vy. Also bumps the simulation alpha so
+   * the kick actually translates to motion. Used by the renderer to
+   * wiggle the graph in response to camera pan/zoom.
+   */
+  nudge(magnitude: number): void;
+  /**
    * Update the layout's target dimensions. The center force re-aims
    * at (w/2, h/2) and the folder forces' fallback target follows.
    * Without this, a container that grows after mount leaves the
@@ -187,6 +203,25 @@ export function createLayout(scene: Scene, opts: LayoutOptions): LayoutHandle {
         force?.strength?.(s.collision);
       }
       sim.alpha(0.3).restart();
+    },
+    setVelocityDecay(decay) {
+      const clamped = Math.max(0.05, Math.min(0.95, decay));
+      sim.velocityDecay(clamped);
+    },
+    nudge(magnitude) {
+      const m = Math.max(0, magnitude);
+      if (m === 0) return;
+      for (const n of scene.nodes) {
+        // Skip pinned nodes — they're being dragged, no extra wobble.
+        if (n.fx !== undefined && n.fx !== null) continue;
+        if (n.fy !== undefined && n.fy !== null) continue;
+        n.vx = (n.vx ?? 0) + (Math.random() - 0.5) * 2 * m;
+        n.vy = (n.vy ?? 0) + (Math.random() - 0.5) * 2 * m;
+      }
+      // Wake the simulation so the kick actually translates to motion.
+      // Use a small alpha (0.05) — enough to keep ticking for ~2s but
+      // not so high that we reshuffle the whole layout.
+      if (sim.alpha() < 0.05) sim.alpha(0.05).restart();
     },
     setBounds(w, h) {
       // Ignore obviously bad inputs.
