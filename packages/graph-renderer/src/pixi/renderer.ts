@@ -183,6 +183,15 @@ export async function mountRenderer(
   let blameEdgesDown: Set<string> | null = null;
   let blameEdgesUp: Set<string> | null = null;
 
+  // Smooth hover fade. Edges and the off-chain dim ramp from 0 → 1 when
+  // the user enters a node and back to 0 when they leave. We delay
+  // clearing `hoverId` / blame state until the fade reaches 0 so the
+  // chain animates out instead of snapping. Lerp factor → ~150ms at
+  // 60fps; tweak HOVER_LERP if you want a snappier or lazier feel.
+  let hoverStrength = 0;
+  let hoverTarget = 0;
+  const HOVER_LERP = 0.18;
+
   // Camera controls.
   let panning = false;
   let panStart: { x: number; y: number; cx: number; cy: number } | null = null;
@@ -220,6 +229,17 @@ export async function mountRenderer(
   buildNodeViews();
 
   app.ticker.add(() => {
+    // Advance the hover fade. When the user has left and the fade has
+    // settled, finally clear the hover state — that's when blame and
+    // edges go away cleanly.
+    hoverStrength += (hoverTarget - hoverStrength) * HOVER_LERP;
+    if (hoverTarget === 0 && hoverStrength < 0.01) {
+      hoverStrength = 0;
+      if (hoverId !== null) {
+        hoverId = null;
+        recomputeBlame();
+      }
+    }
     drawEdges();
     drawNodes();
   });
@@ -358,13 +378,16 @@ export async function mountRenderer(
       g.on("pointerdown", (ev) => handlePointerDown(node, ev));
       g.on("pointerover", () => {
         hoverId = node.id;
+        hoverTarget = 1;
         recomputeBlame();
         opts.onNodeHover?.(node);
       });
       g.on("pointerout", () => {
         if (hoverId === node.id) {
-          hoverId = null;
-          recomputeBlame();
+          // Drive the fade-out; hoverId + blame stay alive until the
+          // ticker sees hoverStrength reach zero, so edges and dim
+          // animate out instead of snapping.
+          hoverTarget = 0;
           opts.onNodeHover?.(null);
         }
       });
@@ -469,10 +492,12 @@ export async function mountRenderer(
 
   function drawEdges(): void {
     edgeLayer.clear();
-    // Edges are now a hover-only affordance: when nothing is hovered we
+    // Edges are a hover-only affordance: when nothing is hovered we
     // skip painting entirely. The graph reads as just nodes; the
     // dependency wiring reveals itself when the user starts pointing.
-    if (hoverId === null) return;
+    // `hoverStrength` ramps in/out so edges fade gracefully instead of
+    // appearing or disappearing in a single frame.
+    if (hoverStrength < 0.01 || hoverId === null) return;
     const bounds = visibleSceneBounds();
     for (const edge of currentScene.edges) {
       const a = sceneNode(edge.source);
@@ -501,7 +526,9 @@ export async function mountRenderer(
       const isDown = blameEdgesDown !== null && blameEdgesDown.has(key);
       const isUp = blameEdgesUp !== null && blameEdgesUp.has(key);
       const isHighlight = isDown || isUp;
-      const alpha = isHighlight ? 0.95 : 0.04;
+      // Both the bright chain and the faint background scale with the
+      // fade strength, so edges ease in/out instead of popping.
+      const alpha = (isHighlight ? 0.95 : 0.04) * hoverStrength;
       const colour = isHighlight ? EDGE_HIGHLIGHT_COLOUR : EDGE_COLOUR;
       const width = Math.max(0.5, edge.weight * 0.8);
       if (isUp) {
@@ -602,13 +629,15 @@ export async function mountRenderer(
           : 1;
 
       // When the blame chain is active, nodes that aren't part of the
-      // chain dim hard so the chain itself pops. The chain nodes keep
-      // their normal colour at full opacity.
+      // chain dim down so the chain pops; chain nodes stay at normal
+      // colour. The dim ramps with `hoverStrength` so the transition is
+      // graceful (off-chain nodes 1.0 → 0.18 over ~150ms on hover-in,
+      // and back to 1.0 on hover-out).
       const blameActive = blameNodes !== null;
       const isHovered = node.id === hoverId;
       const inBlame = blameActive && blameNodes!.has(node.id);
       const offBlame = blameActive && !inBlame;
-      const blameDim = offBlame ? 0.18 : 1;
+      const blameDim = offBlame ? 1 - 0.82 * hoverStrength : 1;
 
       graphic.alpha = (dim ?? baseAlpha) * fadeIn * redPulse * blameDim;
 
@@ -629,15 +658,16 @@ export async function mountRenderer(
               : nearbyLabelIds.has(node.id) || node.id === hoverId || inBlame;
 
       // Hover spotlight: the hovered node's label grows ~30% and stays
-      // fully opaque. When a blame chain is active, off-chain labels
-      // disappear entirely; otherwise non-hovered visible labels fade
-      // to 50%.
+      // fully opaque. Off-chain labels ease toward invisible; non-
+      // hovered chain labels ease toward 50%. Each interpolation
+      // multiplies the off-state delta by `hoverStrength` so the
+      // animation matches the edge fade.
       const hoverDim = offBlame
-        ? 0
+        ? 1 - hoverStrength
         : hoverId !== null && !isHovered
-          ? 0.5
+          ? 1 - 0.5 * hoverStrength
           : 1;
-      const labelScale = isHovered ? 1.3 : 1;
+      const labelScale = isHovered ? 1 + 0.3 * hoverStrength : 1;
 
       label.visible = showLabel;
       label.alpha = showLabel ? 0.85 * fadeIn * hoverDim : 0;
